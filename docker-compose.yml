@@ -1,0 +1,8 @@
+services:
+  gestor-personal-web:
+    build: .
+    image: gestor-personal-web:dev
+    container_name: gestor-personal-web
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
