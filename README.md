@@ -3,13 +3,13 @@
 Aplicación **nativa ligera para Windows** construida con **Tauri 2 + Vue 3** (interfaz web moderna
 sobre WebView2, sin Chromium propio: el ejecutable final pesa unos pocos MB) para gestionar personal
 y planificar **turnos automáticos quincenales** con alternancia semana a semana, reajuste automático
-de cobertura, **calendario mensual de ausencias con los colores de cada empleada** y
+de cobertura, **calendario mensual de ausencias con los colores de cada empleado** y
 **exportación a PDF**.
 
 ## Funcionalidades
 
-- **👥 Plantilla** — CRUD de empleadas con **historial de acciones**: un clic en la fila de una
-  empleada abre su historial con cada cambio de ficha (alta, baja, salario, contrato…), ausencias
+- **👥 Plantilla** — CRUD de empleados con **historial de acciones**: un clic en la fila de un
+  empleado abre su historial con cada cambio de ficha (alta, baja, salario, contrato…), ausencias
   y apuntes de tiempo recuperable, **ordenado de más reciente a más antiguo** (el lápiz sigue
   abriendo la ficha para editar). La tabla se **ordena con un clic en cualquier cabecera**
   (↑/↓ alterna sentido; las de baja quedan siempre al final). Ficha completa: nombre, DNI/NIE, nº Seguridad Social,
@@ -28,28 +28,29 @@ de cobertura, **calendario mensual de ausencias con los colores de cada empleada
     corresponder el año completo (30 por defecto). El tooltip de cada celda explica el cálculo
     y la ficha muestra la vista previa en vivo.
 - **🗓️ Calendario de turnos (quincenal)** — Dos semanas en una única tabla con cabecera
-  **Semana N · Lunes d · Martes d · Miércoles d · …** y **una fila por empleada**: en cada celda
+  **Semana N · Lunes d · Martes d · Miércoles d · …** y **una fila por empleado**: en cada celda
   una **M** (mañana) o **T** (tarde) pintada de fondo con su color de turno.
-  - **Todo el personal disponible queda asignado** a un turno cada día (varias empleadas pueden
+  - **Todo el personal disponible queda asignado** a un turno cada día (varios empleados pueden
     compartir turno).
   - **Alternancia semanal**: quien cubre mañana una semana pasa a la tarde la siguiente y
     viceversa (todo el personal alterna; ya no hay disponibilidad fija por turnos).
   - **Reajuste automático**: si un turno se queda sin la cobertura mínima (por vacaciones, bajas
     o descansos de última hora) se mueve personal del otro turno para cubrirlo, sin vaciarlo.
-  - **Editable**: clic en una celda → *mañana / tarde / descanso / volver a automático*. Lo
-    manual (borde índigo) y los descansos («—») se conservan al regenerar. El popup de edición
-    se cierra al hacer **clic fuera** de él (o con **Escape**); clicar otra celda lo reubica y
-    mantiene abierto para seguir ajustando.
+  - **Editable**: clic en una celda → *mañana / tarde / descanso / volver a automático*, con
+    **motivo del cambio** (rojo = cambio de la empresa, marrón = intercambio entre empleados) y
+    **comentario** opcional. Lo fijado a mano y los descansos («—») se conservan al regenerar.
+    El popup de edición se cierra al hacer **clic fuera** de él (o con **Escape**); clicar otra
+    celda lo reubica y mantiene abierto para seguir ajustando.
   - Ausencias con su sigla (V / B / A / SJ) y aviso de huecos de cobertura.
   - **Exportar PDF**: botón que descarga la quincena visible (A4 horizontal, colores de turnos y
-    de empleadas, huecos marcados).
+    de empleados, huecos marcados).
 - **🔧 Mantenimiento** — **Exportar base de datos** (descarga un `.json` con todo),
   **Importar base de datos** (sustituye los datos desde una copia exportada, con validación) y
   **copias de seguridad programadas**: frecuencia diaria/semanal/mensual, conservación de las
   últimas N copias (rotación), copia manual, y listado con *Restaurar* y *Eliminar*. La comprobación
   de copias automáticas se hace al abrir la app y cada hora mientras esté abierta.
 - **🌴 Vacaciones y ausencias** — **Calendario del mes en curso con flechas ‹ ›** (y botón *Hoy*)
-  para navegar. Cada día muestra **el color de cada empleada** que esté de *Vacaciones*, *Baja
+  para navegar. Cada día muestra **el color de cada empleado** que esté de *Vacaciones*, *Baja
   médica*, *Asuntos propios* o *Sin justificar*, con registro/edición/borrado al instante.
   - **Comentario opcional**: al registrar o editar una ausencia (o un apunte de tiempo
     recuperable) se puede añadir un comentario (motivo, justificante…), que queda visible en
@@ -59,7 +60,7 @@ de cobertura, **calendario mensual de ausencias con los colores de cada empleada
     **aparece en su día dentro del calendario** (pastilla verde con el valor) además de listado
     por mes junto a las ausencias, y su suma se refleja en la columna *Tiempo Recuperable* de
     la Plantilla.
-  - **Filtros rápidos**: barra sobre el calendario para filtrar por **empleada** y/o **tipo**
+  - **Filtros rápidos**: barra sobre el calendario para filtrar por **empleado** y/o **tipo**
     (Vacaciones, Baja médica, Asuntos propios, Sin justificar, Tiempo recuperable) con botón
     *Aplicar*; el calendario, el detalle del día y las listas laterales muestran solo lo que
     coincide (y *Quitar filtros* lo restaura todo).
@@ -158,7 +159,7 @@ Los datos se guardan en `localStorage` del navegador / WebView2 (persisten entre
 
 Cada quincena (14 días naturales alineados con semanas ISO) el planificador:
 
-1. Decide el **turno semanal** de cada empleada: alternancia respecto a la semana anterior
+1. Decide el **turno semanal** de cada empleado: alternancia respecto a la semana anterior
    (quien estuvo de mañana pasa a tarde y viceversa).
 2. Día a día asigna a **todo el personal disponible** su turno semanal; si un turno queda por
    debajo de la cobertura mínima (ausencias, descansos…), se **reajusta** moviendo personal del
