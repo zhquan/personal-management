@@ -1,13 +1,18 @@
 import { reactive } from "vue";
-import type { Asignacion, Ausencia, Empleado, Fecha, HistorialItem, Hueco, TiempoRecuperable, Turno } from "./types";
-import { plantillaEmpleado, tipoNombre } from "./types";
-import { addDays, compare, fmt, hoy, inicioQuincena, indiceQuincena } from "./dates";
+import type { Asignacion, Ausencia, Empleado, Fecha, HistorialCambio, HistorialItem, Hueco, Origen, PeriodoCierre, PlanAvanzado, TiempoRecuperable, TipoTurno, Turno } from "./types";
+import { plantillaEmpleado, TIPOS_TURNO_BASE, tipoNombre } from "./types";
+import { addDays, compare, diasQuincena, fmt, hoy, inicioQuincena, indiceQuincena } from "./dates";
 import { formatearTiempo } from "./tiempo";
 import { planificar } from "./scheduler";
+import { generarFranjas, minutosAFormato, minutosDe, normalizarHora, MINUTOS_FRANJA } from "./horario";
+import type { Franja } from "./horario";
 
 // ------------------------------------------------------------------ Estado
 const CLAVE = "gestor-personal-v2";
-const VERSION_DATOS = 3; // v3: historial de acciones por empleada
+const VERSION_DATOS = 7; // v7: capa de planificación por horas de la vista Avanzada del calendario
+
+/** Rango horario por defecto de la vista Avanzada (franjas de 30 min). */
+const RANGO_VISTA_POR_DEFECTO = { desde: "06:00", hasta: "22:00" } as const;
 
 interface AppData {
   version?: number;
@@ -18,8 +23,24 @@ interface AppData {
   asignaciones: Asignacion[];
   /** Días de descanso fijados a mano: `${empleadoId}|${fecha}`. */
   descansos: string[];
-  /** Historial de acciones por empleada (más reciente primero). */
+  /** Historial de acciones por empleado (más reciente primero). */
   historial: HistorialItem[];
+  /** Días de la semana en que la empresa cierra (1 = lunes … 7 = domingo). */
+  diasCierre: number[];
+  /** Períodos de cierre (p. ej. vacaciones de la empresa): rangos de fechas. */
+  periodosCierre: PeriodoCierre[];
+  /** Tipos de turno (Mañana/Tarde incluidos; si se borran, dejan de programarse). */
+  tiposTurno: TipoTurno[];
+  /** Hora de inicio (HH:MM) de las franjas de la vista Avanzada del calendario. */
+  desdeVistaAvanzada: string;
+  /** Hora de fin (HH:MM) de las franjas de la vista Avanzada del calendario. */
+  hastaVistaAvanzada: string;
+  /** Duración (en minutos) de cada franja de la vista Avanzada (p. ej. 30 = 00:30). */
+  duracionFranjaVistaAvanzada: number;
+  /** Planificación por horas de la vista Avanzada: tramos empleado + desde/hasta por día. */
+  planAvanzada: PlanAvanzado[];
+  /** La vista Avanzada del calendario está activada (visible y configurable). */
+  vistaAvanzadaActivada: boolean;
 }
 
 const vacio = (): AppData => ({
@@ -29,8 +50,48 @@ const vacio = (): AppData => ({
   tiempos: [],
   asignaciones: [],
   descansos: [],
-  historial: []
+  historial: [],
+  diasCierre: [],
+  periodosCierre: [],
+  tiposTurno: [...TIPOS_TURNO_BASE],
+  desdeVistaAvanzada: RANGO_VISTA_POR_DEFECTO.desde,
+  hastaVistaAvanzada: RANGO_VISTA_POR_DEFECTO.hasta,
+  duracionFranjaVistaAvanzada: MINUTOS_FRANJA,
+  planAvanzada: [],
+  vistaAvanzadaActivada: true
 });
+
+/** Valida y normaliza un tramo de planificación de la vista Avanzada (o lo descarta). */
+function normalizarPlanAvanzado(lista: unknown): PlanAvanzado[] {
+  if (!Array.isArray(lista)) return [];
+  const out: PlanAvanzado[] = [];
+  for (const item of lista as Partial<PlanAvanzado>[]) {
+    if (!item || typeof item !== "object") continue;
+    const desde = normalizarHora(item.desde ?? "");
+    const hasta = normalizarHora(item.hasta ?? "");
+    if (
+      typeof item.empleadoId !== "number" ||
+      typeof item.fecha !== "string" ||
+      !desde || !hasta || desde >= hasta
+    ) continue;
+    out.push({
+      id: typeof item.id === "number" ? item.id : Date.now() + out.length,
+      empleadoId: item.empleadoId,
+      fecha: item.fecha,
+      desde,
+      hasta
+    });
+  }
+  return out;
+}
+
+/** Devuelve la lista de tipos garantizando que Mañana y Tarde estén al principio. */
+function conTurnosBase(lista: TipoTurno[]): TipoTurno[] {
+  const personalizados = lista.filter((t) => t.id > 0);
+  const base = TIPOS_TURNO_BASE.filter(
+    (b) => !personalizados.some((t) => t.sigla === b.sigla));
+  return [...base, ...personalizados];
+}
 
 function cargar(): AppData {
   try {
@@ -40,10 +101,60 @@ function cargar(): AppData {
     if (!d || !Array.isArray(d.empleados)) return vacio();
     // Rellena con valores por defecto los campos nuevos (datos guardados antes de que existieran).
     d.empleados = d.empleados.map((e) => ({ ...plantillaEmpleado(), ...e }));
+    // Ajustes (v4): cierre de la empresa y tipos de turno personalizados.
+    d.diasCierre = Array.isArray(d.diasCierre)
+      ? (d.diasCierre as unknown[]).filter((x): x is number => typeof x === "number" && x >= 1 && x <= 7)
+      : [];
+    d.periodosCierre = Array.isArray(d.periodosCierre)
+      ? (d.periodosCierre as PeriodoCierre[]).filter(
+          (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
+      : [];
+    d.tiposTurno = Array.isArray(d.tiposTurno)
+      ? (d.tiposTurno as Partial<TipoTurno>[]).map((t) => ({
+          automatico: false,
+          desde: undefined,
+          hasta: undefined,
+          ...t
+        }) as TipoTurno)
+      : [];
+    // Migración v4 → v5: Mañana y Tarde pasan a ser entradas de tiposTurno y se
+    // pueden borrar. En los datos anteriores a v5 no existían ahí: se añaden.
+    // (Desde v5 se respeta la lista tal cual: si se borraron, siguen borrados.)
+    if ((d.version ?? 1) < 5) {
+      d.tiposTurno = conTurnosBase(d.tiposTurno);
+    }
+    // Migración v5 → v6: Mañana y Tarde ganan horario (desde/hasta) para la vista
+    // Avanzada; si no lo tenían guardado se rellena con el por defecto.
+    if ((d.version ?? 1) < 6) {
+      for (const b of TIPOS_TURNO_BASE) {
+        const t = d.tiposTurno.find((x) => x.id < 0 && x.sigla === b.sigla);
+        if (t && (!t.desde || !t.hasta)) {
+          if (!t.desde) t.desde = b.desde;
+          if (!t.hasta) t.hasta = b.hasta;
+        }
+      }
+    }
+    // Rango de la vista Avanzada (v6): horas configurables de las franjas de 30 min.
+    d.desdeVistaAvanzada = normalizarHora(d.desdeVistaAvanzada) ?? RANGO_VISTA_POR_DEFECTO.desde;
+    d.hastaVistaAvanzada = normalizarHora(d.hastaVistaAvanzada) ?? RANGO_VISTA_POR_DEFECTO.hasta;
+    if (d.desdeVistaAvanzada >= d.hastaVistaAvanzada) {
+      d.desdeVistaAvanzada = RANGO_VISTA_POR_DEFECTO.desde;
+      d.hastaVistaAvanzada = RANGO_VISTA_POR_DEFECTO.hasta;
+    }
+    // Duración de cada franja de la vista Avanzada (p. ej. 00:30 = 30 min).
+    const dur = typeof d.duracionFranjaVistaAvanzada === "number" && Number.isFinite(d.duracionFranjaVistaAvanzada)
+      ? Math.round(d.duracionFranjaVistaAvanzada)
+      : MINUTOS_FRANJA;
+    d.duracionFranjaVistaAvanzada =
+      dur >= 10 && dur <= 240 ? dur : MINUTOS_FRANJA;
+    // Capa de planificación por horas de la vista Avanzada (v7).
+    d.planAvanzada = normalizarPlanAvanzado(d.planAvanzada);
+    // La vista Avanzada está activada salvo que se desactivara expresamente.
+    d.vistaAvanzadaActivada = d.vistaAvanzadaActivada !== false;
     // Migración v1 → v2: el planificador ya no usa disponibilidad por turnos y el
-    // cómputo de días de vacaciones por defecto pasa de 22 a 30.
-    if ((d.version ?? 1) < VERSION_DATOS) {
-      d.version = VERSION_DATOS;
+    // cómputo de días de vacaciones por defecto pasa de 22 a 30. (Solo afecta a
+    // datos de la v1; las versiones nuevas ya guardan los días configurados.)
+    if ((d.version ?? 1) < 2) {
       d.tiempos = Array.isArray(d.tiempos) ? d.tiempos : [];
       for (const e of d.empleados) {
         if (e.diasVacacionesAnuales === 22) e.diasVacacionesAnuales = 30;
@@ -51,11 +162,22 @@ function cargar(): AppData {
         delete (e as unknown as Record<string, unknown>).dispTarde;
       }
     }
+    // A partir de la v3 el historial ya se guarda; la v2 no lo tenía.
+    if ((d.version ?? 1) < VERSION_DATOS) {
+      d.version = VERSION_DATOS;
+    }
     // Las asignaciones automáticas son deterministas y se regeneran al navegar:
-    // solo se persisten las manuales (descansos aparte). Así el almacenamiento y
-    // cada guardado no crecen con todo el historial de quincenas generadas.
+    // solo se persisten las fijadas a mano (descansos aparte). Así el almacenamiento
+    // y cada guardado no crecen con todo el historial de quincenas generadas.
+    // Las antiguas «manual» pasan a considerarse cambios hechos por la empresa.
     d.asignaciones = (Array.isArray(d.asignaciones) ? d.asignaciones : [])
-      .filter((a) => a.origen === "manual");
+      .filter((a) => a && typeof a === "object" && (a as { origen?: string }).origen !== "auto")
+      .map((a) => ({
+        comentario: "",
+        ...a,
+        // Datos antiguos guardaban «manual»: ahora se consideran cambios de la empresa.
+        origen: (a as { origen?: string }).origen === "manual" ? "empresa" : a.origen
+      }));
     // Comentario opcional en ausencias y tiempo recuperable.
     if (Array.isArray(d.ausencias)) {
       d.ausencias = d.ausencias.map((a) => ({ comentario: "", ...a }));
@@ -64,7 +186,7 @@ function cargar(): AppData {
       d.tiempos = d.tiempos.map((t) => ({ comentario: "", ...t }));
     }
     // Migración v2 → v3: historial de acciones. Para los datos ya guardados se
-    // anota al menos el alta de cada empleada como primera entrada.
+    // anota al menos el alta de cada empleado como primera entrada.
     if (!Array.isArray(d.historial)) {
       d.historial = [];
       for (const e of d.empleados) {
@@ -74,7 +196,7 @@ function cargar(): AppData {
           empleadoId: e.id,
           cuando: `${e.alta}T10:00:00.000Z`,
           tipo: "perfil",
-          texto: `Empleada dada de alta el ${fmt(e.alta)}`
+          texto: `Empleado dado de alta el ${fmt(e.alta)}`
         });
       }
     }
@@ -89,7 +211,7 @@ function guardar() {
     const datos = {
       ...state,
       // No se persisten las automáticas: se regeneran al inicio y al navegar.
-      asignaciones: state.asignaciones.filter((a) => a.origen === "manual")
+      asignaciones: state.asignaciones.filter((a) => a.origen !== "auto")
     };
     localStorage.setItem(CLAVE, JSON.stringify(datos));
   } catch {
@@ -107,14 +229,20 @@ function siguienteId(lista: { id: number }[]): number {
 }
 
 // ----------------------------------------------------------------- Historial
-/** Añade una acción al historial de una empleada y persiste (máx. 150 por empleada). */
-function registrarHistorial(empleadoId: number, tipo: HistorialItem["tipo"], texto: string) {
+/** Añade una acción al historial de un empleado y persiste (máx. 150 por empleado). */
+function registrarHistorial(
+  empleadoId: number,
+  tipo: HistorialItem["tipo"],
+  texto: string,
+  cambios?: HistorialCambio[]
+) {
   state.historial.push({
     id: siguienteId(state.historial),
     empleadoId,
     cuando: new Date().toISOString(),
     tipo,
-    texto
+    texto,
+    cambios: cambios && cambios.length ? cambios : undefined
   });
   const porEmp = state.historial.filter((h) => h.empleadoId === empleadoId);
   if (porEmp.length > 150) {
@@ -124,7 +252,7 @@ function registrarHistorial(empleadoId: number, tipo: HistorialItem["tipo"], tex
   guardar();
 }
 
-/** Acciones de una empleada, de la más reciente a la más antigua. */
+/** Acciones de un empleado, de la más reciente a la más antigua. */
 export function historialDeEmpleado(id: number): HistorialItem[] {
   return state.historial
     .filter((h) => h.empleadoId === id)
@@ -135,6 +263,7 @@ const NOMBRES_CAMPO_PERFIL: Record<string, string> = {
   nombre: "nombre",
   apellidos: "apellidos",
   dni: "DNI/NIE",
+  nss: "nº Seguridad Social",
   telefono: "teléfono",
   iban: "IBAN",
   nacimiento: "fecha de nacimiento",
@@ -146,31 +275,59 @@ const NOMBRES_CAMPO_PERFIL: Record<string, string> = {
   notas: "notas internas"
 };
 
-/** Texto resumen de los cambios de ficha (vacío si nada cambió). */
-function resumenCambiosPerfil(antes: Empleado, nuevo: Empleado): string {
-  const partes: string[] = [];
+/** Valor legible de un campo de ficha para mostrarlo en el historial. */
+function valorCampoPerfil(e: Empleado, clave: string): string {
+  const v = (e as unknown as Record<string, unknown>)[clave];
+  const vacio = v == null || v === "";
+  switch (clave) {
+    case "nacimiento":
+      return vacio ? "—" : fmt(v as string);
+    case "jornadaHoras":
+      return vacio ? "—" : `${v} h`;
+    case "salarioBruto":
+      return vacio ? "—" : String(v);
+    case "notas": {
+      const t = String(v ?? "").trim();
+      return t ? (t.length > 70 ? `${t.slice(0, 70)}…` : t) : "—";
+    }
+    default:
+      return vacio ? "—" : String(v);
+  }
+}
+
+/** Texto y cambios estructurados de una edición de ficha (vacíos si nada cambió). */
+function resumenCambiosPerfil(antes: Empleado, nuevo: Empleado): {
+  texto: string;
+  cambios: HistorialCambio[];
+} {
+  const cambios: HistorialCambio[] = [];
   if (!antes.baja && nuevo.baja) {
-    partes.push(`Baja registrada el ${fmt(nuevo.baja)}`);
+    cambios.push({ nota: `Baja registrada el ${fmt(nuevo.baja)}` });
   } else if (antes.baja && !nuevo.baja) {
-    partes.push("Fecha de baja eliminada (vuelve a estar activa)");
+    cambios.push({ nota: "Fecha de baja eliminada (vuelve a estar activo)" });
   } else if (antes.baja && nuevo.baja && antes.baja !== nuevo.baja) {
-    partes.push(`Fecha de baja cambiada a ${fmt(nuevo.baja)}`);
+    cambios.push({ nota: `Fecha de baja cambiada a ${fmt(nuevo.baja)}` });
   }
   const motivoCambiado =
     (antes.motivoBaja ?? "") !== (nuevo.motivoBaja ?? "") && antes.baja === nuevo.baja;
-  if (motivoCambiado) partes.push("Comentario de la baja actualizado");
+  if (motivoCambiado) cambios.push({ nota: "Comentario de la baja actualizado" });
 
-  const cambiados: string[] = [];
   for (const [k, etiqueta] of Object.entries(NOMBRES_CAMPO_PERFIL)) {
     if ((antes as unknown as Record<string, unknown>)[k] !== (nuevo as unknown as Record<string, unknown>)[k]) {
-      cambiados.push(etiqueta);
+      cambios.push({
+        campo: etiqueta,
+        antes: valorCampoPerfil(antes, k),
+        despues: valorCampoPerfil(nuevo, k)
+      });
     }
   }
   if (antes.alta !== nuevo.alta) {
-    cambiados.push(`fecha de alta (${fmt(antes.alta)} → ${fmt(nuevo.alta)})`);
+    cambios.push({ campo: "fecha de alta", antes: fmt(antes.alta), despues: fmt(nuevo.alta) });
   }
-  if (cambiados.length) partes.push(`Perfil actualizado: ${cambiados.join(", ")}`);
-  return partes.join(" · ");
+
+  const partes: string[] = cambios.map((c) =>
+    c.nota ? c.nota : `${c.campo} ${c.antes} → ${c.despues}`);
+  return { texto: partes.join(" · "), cambios };
 }
 
 function resumenAusencia(a: Ausencia): string {
@@ -211,18 +368,18 @@ function sembrar() {
   const ahora = Date.now();
   const hace = (ms: number) => new Date(ahora - ms).toISOString();
   const historial: HistorialItem[] = [
-    { id: 1, empleadoId: 1, cuando: hace(2400 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[0].alta)}` },
-    { id: 2, empleadoId: 1, cuando: hace(3 * 3600e3), tipo: "ausencia", texto: `Añadida ${resumenAusencia(ausencias[0])}` },
+    { id: 1, empleadoId: 1, cuando: hace(2400 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[0].alta)}` },
+    { id: 2, empleadoId: 1, cuando: hace(3 * 3600e3), tipo: "ausencia", texto: `Añadido: ${resumenAusencia(ausencias[0])}` },
     { id: 3, empleadoId: 1, cuando: hace(2 * 3600e3), tipo: "tiempo", texto: `Añadido apunte de tiempo recuperable: ${formatearTiempo(tiempos[0].minutos)} (${fmt(tiempos[0].fecha)})` },
-    { id: 4, empleadoId: 4, cuando: hace(430 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[3].alta)}` },
-    { id: 5, empleadoId: 4, cuando: hace(5 * 3600e3), tipo: "ausencia", texto: `Añadida ${resumenAusencia(ausencias[1])}` },
+    { id: 4, empleadoId: 4, cuando: hace(430 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[3].alta)}` },
+    { id: 5, empleadoId: 4, cuando: hace(5 * 3600e3), tipo: "ausencia", texto: `Añadido: ${resumenAusencia(ausencias[1])}` },
     { id: 6, empleadoId: 4, cuando: hace(3600e3), tipo: "tiempo", texto: `Añadido apunte de tiempo recuperable: ${formatearTiempo(tiempos[1].minutos)} (${fmt(tiempos[1].fecha)})` },
-    { id: 7, empleadoId: 7, cuando: hace(4 * 3600e3), tipo: "ausencia", texto: `Añadida ${resumenAusencia(ausencias[2])}` },
-    { id: 8, empleadoId: 2, cuando: hace(800 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[1].alta)}` },
-    { id: 9, empleadoId: 3, cuando: hace(1500 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[2].alta)}` },
-    { id: 10, empleadoId: 5, cuando: hace(1200 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[4].alta)}` },
-    { id: 11, empleadoId: 6, cuando: hace(95 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[5].alta)}` },
-    { id: 12, empleadoId: 7, cuando: hace(700 * 864e5), tipo: "perfil", texto: `Empleada dada de alta el ${fmt(datos[6].alta)}` }
+    { id: 7, empleadoId: 7, cuando: hace(4 * 3600e3), tipo: "ausencia", texto: `Añadido: ${resumenAusencia(ausencias[2])}` },
+    { id: 8, empleadoId: 2, cuando: hace(800 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[1].alta)}` },
+    { id: 9, empleadoId: 3, cuando: hace(1500 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[2].alta)}` },
+    { id: 10, empleadoId: 5, cuando: hace(1200 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[4].alta)}` },
+    { id: 11, empleadoId: 6, cuando: hace(95 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[5].alta)}` },
+    { id: 12, empleadoId: 7, cuando: hace(700 * 864e5), tipo: "perfil", texto: `Empleado dado de alta el ${fmt(datos[6].alta)}` }
   ];
   state.empleados = datos;
   state.ausencias = ausencias;
@@ -252,14 +409,14 @@ export function guardarEmpleado(e: Empleado): Empleado {
   if (!e.id) {
     e.id = siguienteId(state.empleados);
     state.empleados.push(e);
-    registrarHistorial(e.id, "perfil", `Empleada dada de alta el ${fmt(e.alta)}`);
+    registrarHistorial(e.id, "perfil", `Empleado dado de alta el ${fmt(e.alta)}`);
   } else {
     const i = state.empleados.findIndex((x) => x.id === e.id);
     if (i >= 0) {
       const anterior = state.empleados[i];
       state.empleados[i] = e;
-      const texto = resumenCambiosPerfil(anterior, e);
-      if (texto) registrarHistorial(e.id, "perfil", texto);
+      const resumen = resumenCambiosPerfil(anterior, e);
+      if (resumen.texto) registrarHistorial(e.id, "perfil", resumen.texto, resumen.cambios);
     }
   }
   guardar();
@@ -272,6 +429,7 @@ export function eliminarEmpleado(id: number) {
   state.tiempos = state.tiempos.filter((t) => t.empleadoId !== id);
   state.asignaciones = state.asignaciones.filter((a) => a.empleadoId !== id);
   state.descansos = state.descansos.filter((d) => !d.startsWith(`${id}|`));
+  state.planAvanzada = state.planAvanzada.filter((p) => p.empleadoId !== id);
   state.historial = state.historial.filter((h) => h.empleadoId !== id);
   guardar();
 }
@@ -289,7 +447,7 @@ export function guardarAusencia(a: Ausencia): Ausencia {
   if (!a.id) {
     a.id = siguienteId(state.ausencias);
     state.ausencias.push(a);
-    registrarHistorial(a.empleadoId, "ausencia", `Añadida ${resumenAusencia(a)}`);
+    registrarHistorial(a.empleadoId, "ausencia", `Añadido: ${resumenAusencia(a)}`);
   } else {
     const i = state.ausencias.findIndex((x) => x.id === a.id);
     if (i >= 0) {
@@ -300,7 +458,7 @@ export function guardarAusencia(a: Ausencia): Ausencia {
         partes.push(resumenAusencia(a));
       }
       if ((anterior.comentario ?? "") !== (a.comentario ?? "")) partes.push("comentario actualizado");
-      if (partes.length) registrarHistorial(a.empleadoId, "ausencia", `Modificada ${partes.join(" · ")}`);
+      if (partes.length) registrarHistorial(a.empleadoId, "ausencia", `Modificado: ${partes.join(" · ")}`);
     }
   }
   guardar();
@@ -310,7 +468,7 @@ export function guardarAusencia(a: Ausencia): Ausencia {
 export function eliminarAusencia(id: number) {
   const a = state.ausencias.find((x) => x.id === id);
   state.ausencias = state.ausencias.filter((x) => x.id !== id);
-  if (a) registrarHistorial(a.empleadoId, "ausencia", `Eliminada ${resumenAusencia(a)}`);
+  if (a) registrarHistorial(a.empleadoId, "ausencia", `Eliminado: ${resumenAusencia(a)}`);
   guardar();
 }
 
@@ -364,7 +522,7 @@ export function tiemposDelMes(anio: number, mes: number): TiempoRecuperable[] {
     .sort((a, b) => compare(a.fecha, b.fecha) || a.empleadoId - b.empleadoId);
 }
 
-/** Saldo (minutos con signo) acumulado por una empleada. */
+/** Saldo (minutos con signo) acumulado por un empleado. */
 export function saldoTiempoDe(empleadoId: number): number {
   let saldo = 0;
   for (const t of state.tiempos) {
@@ -373,7 +531,7 @@ export function saldoTiempoDe(empleadoId: number): number {
   return saldo;
 }
 
-/** Mapa de saldo por empleada (para listar sin repetir recorridos). */
+/** Mapa de saldo por empleado (para listar sin repetir recorridos). */
 export function saldoTiemposPorEmpleado(): Map<number, number> {
   const saldo = new Map<number, number>();
   for (const t of state.tiempos) {
@@ -410,9 +568,9 @@ function diasDelAnio(anio: number): number {
 }
 
 /**
- * Días de vacaciones que corresponden a una empleada en `anio`.
+ * Días de vacaciones que corresponden a un empleado en `anio`.
  *
- * Si el alta es anterior al año y sigue activa (o causa baja al terminar el año)
+ * Si el alta es anterior al año y sigue activo (o causa baja al terminar el año)
  * devuelve sus días anuales completos (p. ej. 30). Si el alta cae dentro del año,
  * o causa baja a mitad de año, prorratea por días exactos desde el alta (o desde el
  * 1 de enero, y hasta la baja o el 31 de diciembre) y redondea al día entero más
@@ -447,9 +605,17 @@ export function exportarDatos(): AppData {
       empleados: state.empleados,
       ausencias: state.ausencias,
       tiempos: state.tiempos,
-      asignaciones: state.asignaciones.filter((a) => a.origen === "manual"),
+      asignaciones: state.asignaciones.filter((a) => a.origen !== "auto"),
       descansos: state.descansos,
-      historial: state.historial
+      historial: state.historial,
+      diasCierre: state.diasCierre,
+      periodosCierre: state.periodosCierre,
+      tiposTurno: state.tiposTurno,
+      desdeVistaAvanzada: state.desdeVistaAvanzada,
+      hastaVistaAvanzada: state.hastaVistaAvanzada,
+      duracionFranjaVistaAvanzada: state.duracionFranjaVistaAvanzada,
+      planAvanzada: state.planAvanzada,
+      vistaAvanzadaActivada: state.vistaAvanzadaActivada
     })
   ) as AppData;
 }
@@ -467,26 +633,228 @@ export function importarDatos(raw: unknown): ResultadoImport {
   }
   const d = raw as Partial<AppData>;
   if (!Array.isArray(d.empleados)) {
-    return { ok: false, mensaje: "No se encontró la lista de empleadas: este archivo no es una copia de Gestor de Personal." };
+    return { ok: false, mensaje: "No se encontró la lista de empleados: este archivo no es una copia de Gestor de Personal." };
   }
   const empleados: Empleado[] = d.empleados.map((e) => ({ ...plantillaEmpleado(), ...(e as Partial<Empleado>) }));
   state.empleados = empleados;
   state.ausencias = Array.isArray(d.ausencias) ? (d.ausencias as Ausencia[]).map((a) => ({ comentario: "", ...a })) : [];
   state.tiempos = Array.isArray(d.tiempos) ? (d.tiempos as TiempoRecuperable[]).map((t) => ({ comentario: "", ...t })) : [];
   state.descansos = Array.isArray(d.descansos) ? d.descansos.filter((x) => typeof x === "string") : [];
+  state.planAvanzada = normalizarPlanAvanzado(d.planAvanzada);
+  state.vistaAvanzadaActivada = d.vistaAvanzadaActivada !== false;
   state.asignaciones = Array.isArray(d.asignaciones)
-    ? (d.asignaciones as Asignacion[]).filter((a) => a && typeof a === "object" && a.origen === "manual")
+    ? (d.asignaciones as Asignacion[])
+        .filter((a) => a && typeof a === "object" && (a as { origen?: string }).origen !== "auto")
+        .map((a) => {
+          // Datos antiguos guardaban «manual»: ahora se consideran cambios de la empresa.
+          const origen = (a as { origen?: string }).origen;
+          return { comentario: "", ...a, origen: origen === "manual" ? "empresa" : a.origen };
+        })
     : [];
   state.historial = Array.isArray(d.historial) ? (d.historial as HistorialItem[]) : [];
+  state.diasCierre = Array.isArray(d.diasCierre)
+    ? (d.diasCierre as unknown[]).filter((x): x is number => typeof x === "number" && x >= 1 && x <= 7)
+    : [];
+  state.periodosCierre = Array.isArray(d.periodosCierre)
+    ? (d.periodosCierre as PeriodoCierre[]).filter(
+        (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
+    : [];
+  const tiposImportados = Array.isArray(d.tiposTurno)
+    ? (d.tiposTurno as Partial<TipoTurno>[]).map((t) => ({
+        automatico: false,
+        desde: undefined,
+        hasta: undefined,
+        ...t
+      }) as TipoTurno)
+    : [];
+  // Datos anteriores a v5 no guardaban Mañana/Tarde en tiposTurno: se añaden.
+  state.tiposTurno = ((d.version ?? 1) < 5) ? conTurnosBase(tiposImportados) : tiposImportados;
+  // Datos anteriores a v6: se rellena el horario por defecto de Mañana y Tarde.
+  if ((d.version ?? 1) < 6) {
+    for (const b of TIPOS_TURNO_BASE) {
+      const t = state.tiposTurno.find((x) => x.id < 0 && x.sigla === b.sigla);
+      if (t && (!t.desde || !t.hasta)) {
+        if (!t.desde) t.desde = b.desde;
+        if (!t.hasta) t.hasta = b.hasta;
+      }
+    }
+  }
+  state.desdeVistaAvanzada = normalizarHora(d.desdeVistaAvanzada ?? "") ?? RANGO_VISTA_POR_DEFECTO.desde;
+  state.hastaVistaAvanzada = normalizarHora(d.hastaVistaAvanzada ?? "") ?? RANGO_VISTA_POR_DEFECTO.hasta;
+  if (state.desdeVistaAvanzada >= state.hastaVistaAvanzada) {
+    state.desdeVistaAvanzada = RANGO_VISTA_POR_DEFECTO.desde;
+    state.hastaVistaAvanzada = RANGO_VISTA_POR_DEFECTO.hasta;
+  }
+  const durImportada = typeof d.duracionFranjaVistaAvanzada === "number" && Number.isFinite(d.duracionFranjaVistaAvanzada)
+    ? Math.round(d.duracionFranjaVistaAvanzada)
+    : MINUTOS_FRANJA;
+  state.duracionFranjaVistaAvanzada = durImportada >= 10 && durImportada <= 240 ? durImportada : MINUTOS_FRANJA;
   state.version = VERSION_DATOS;
   guardar();
   huecosPorQuincena.clear();
   regenerarAlrededor();
   return {
     ok: true,
-    mensaje: `Se importaron los datos: ${state.empleados.length} empleadas, ${state.ausencias.length} ausencias, ${state.tiempos.length} apuntes de tiempo.`,
+    mensaje: `Se importaron los datos: ${state.empleados.length} empleados, ${state.ausencias.length} ausencias, ${state.tiempos.length} apuntes de tiempo.`,
     empleados: state.empleados.length
   };
+}
+
+// ------------------------------------------------------------------ Ajustes
+/** Guarda qué días de la semana cierra la empresa (1 = lunes … 7 = domingo). */
+export function setDiasCierre(dias: number[]) {
+  state.diasCierre = [...new Set(dias.filter((d) => d >= 1 && d <= 7))].sort((a, b) => a - b);
+  guardar();
+  regenerarAlrededor();
+}
+
+/** Añade un período de cierre (empresa cerrada entre esas fechas, ambas incluidas). */
+export function anyadirPeriodoCierre(inicio: Fecha, fin: Fecha) {
+  if (!inicio || !fin || compare(inicio, fin) > 0) return;
+  state.periodosCierre.push({ inicio, fin });
+  guardar();
+  regenerarAlrededor();
+}
+
+export function quitarPeriodoCierre(indice: number) {
+  state.periodosCierre.splice(indice, 1);
+  guardar();
+  regenerarAlrededor();
+}
+
+/** Añade o actualiza un tipo de turno personalizado (id 0 = nuevo). */
+export function guardarTipoTurno(tipo: TipoTurno) {
+  const limpio: TipoTurno = {
+    id: tipo.id,
+    nombre: tipo.nombre.trim(),
+    sigla: tipo.sigla.trim(),
+    color: /^#[0-9a-fA-F]{6}$/.test(tipo.color) ? tipo.color : "#7C3AED",
+    desde: tipo.desde?.trim() || undefined,
+    hasta: tipo.hasta?.trim() || undefined,
+    automatico: tipo.automatico
+  };
+  if (!limpio.sigla) return;
+  // Mañana y Tarde no se crean como personalizados: si se borraron, se
+  // restauran con `restaurarTurnosBase` para mantener su orden y comportamiento.
+  if (limpio.id >= 0 && (limpio.sigla === "M" || limpio.sigla === "T")) return;
+  const i = state.tiposTurno.findIndex((t) => t.id === limpio.id);
+  if (i >= 0) state.tiposTurno[i] = limpio;
+  else state.tiposTurno.push({ ...limpio, id: siguienteId(state.tiposTurno) });
+  guardar();
+  regenerarAlrededor();
+}
+
+/** Elimina un tipo de turno (incluidos Mañana y Tarde) y sus asignaciones a mano. */
+export function quitarTipoTurno(id: number) {
+  const tipo = state.tiposTurno.find((t) => t.id === id);
+  state.tiposTurno = state.tiposTurno.filter((t) => t.id !== id);
+  if (tipo) {
+    state.asignaciones = state.asignaciones.filter(
+      (a) => !(a.origen !== "auto" && a.turno === tipo.sigla));
+  }
+  guardar();
+  regenerarAlrededor();
+}
+
+/** Vuelve a añadir Mañana y Tarde si alguno se había borrado (al principio de la lista). */
+export function restaurarTurnosBase() {
+  const faltan = TIPOS_TURNO_BASE.filter((b) => !state.tiposTurno.some((t) => t.sigla === b.sigla));
+  if (!faltan.length) return;
+  state.tiposTurno = conTurnosBase(state.tiposTurno);
+  guardar();
+  regenerarAlrededor();
+}
+
+/** Rango horario (HH:MM) configurado para la vista Avanzada del calendario. */
+export function rangoVistaAvanzada(): { desde: string; hasta: string } {
+  return { desde: state.desdeVistaAvanzada, hasta: state.hastaVistaAvanzada };
+}
+
+/**
+ * Valida y guarda el rango de la vista Avanzada del calendario. Devuelve un
+ * mensaje de error (o "" si se guardó correctamente). El rango debe encajar en
+ * franjas completas con la duración configurada (p. ej. 06:00–22:00 con 00:30).
+ */
+export function setRangoVistaAvanzada(desde: string, hasta: string): string {
+  const a = normalizarHora(desde);
+  const b = normalizarHora(hasta);
+  if (!a || !b) return "Indica la hora de inicio y de fin (HH:MM).";
+  if (a >= b) return "La hora de inicio debe ser anterior a la de fin.";
+  const total = (minutosDe(b) ?? 0) - (minutosDe(a) ?? 0);
+  if (total % state.duracionFranjaVistaAvanzada !== 0) {
+    return `El rango (${minutosAFormato(total)}) no encaja en franjas completas de ${minutosAFormato(state.duracionFranjaVistaAvanzada)}: ajusta las horas o la duración de la franja.`;
+  }
+  state.desdeVistaAvanzada = a;
+  state.hastaVistaAvanzada = b;
+  guardar();
+  return "";
+}
+
+/**
+ * Valida y guarda la duración de cada franja de la vista Avanzada (en formato
+ * HH:MM, p. ej. «00:30» = media hora). Devuelve un mensaje de error (o "" si se
+ * guardó correctamente). La duración debe dividir el rango horario configurado.
+ */
+export function setDuracionFranjaVistaAvanzada(duracion: string): string {
+  const min = minutosDe(duracion);
+  if (min === null) return "Indica la duración en formato HH:MM (p. ej. 00:30).";
+  if (min < 10 || min > 240) return "La duración debe estar entre 00:10 y 04:00.";
+  const a = minutosDe(state.desdeVistaAvanzada) ?? 0;
+  const b = minutosDe(state.hastaVistaAvanzada) ?? 0;
+  if (b > a && (b - a) % min !== 0) {
+    return `El rango (${minutosAFormato(b - a)}) no encaja en franjas de ${minutosAFormato(min)}: elige una duración que lo divida (p. ej. 00:15, 00:30 o 01:00).`;
+  }
+  state.duracionFranjaVistaAvanzada = min;
+  guardar();
+  return "";
+}
+
+/** Duración (minutos) de cada franja de la vista Avanzada. */
+export function duracionFranjaVistaAvanzada(): number {
+  return state.duracionFranjaVistaAvanzada;
+}
+
+/** Activa o desactiva la vista Avanzada del calendario (y su configuración). */
+export function setVistaAvanzadaActivada(activada: boolean) {
+  state.vistaAvanzadaActivada = activada;
+  guardar();
+}
+
+/** Franjas entre las horas configuradas para la vista Avanzada, con su duración. */
+export function franjasVistaAvanzada(): Franja[] {
+  return generarFranjas(
+    state.desdeVistaAvanzada,
+    state.hastaVistaAvanzada,
+    state.duracionFranjaVistaAvanzada);
+}
+
+/** True si la empresa está cerrada ese día (cierre semanal o por período). */
+export function esDiaCerrado(fecha: Fecha): boolean {
+  // Día de la semana en ISO (1 = lunes … 7 = domingo).
+  const d = new Date(Date.UTC(Number(fecha.slice(0, 4)), Number(fecha.slice(5, 7)) - 1, Number(fecha.slice(8, 10))));
+  const iso = ((d.getUTCDay() + 6) % 7) + 1;
+  if (state.diasCierre.includes(iso)) return true;
+  return state.periodosCierre.some((p) => compare(fecha, p.inicio) >= 0 && compare(fecha, p.fin) <= 0);
+}
+
+/** Nombre, color y horas de un turno (M, T o sigla personalizada). */
+export function infoTurno(sigla: string): {
+  nombre: string;
+  color?: string;
+  desde?: string;
+  hasta?: string;
+} {
+  if (sigla === "M") return { nombre: "Mañana" };
+  if (sigla === "T") return { nombre: "Tarde" };
+  const t = state.tiposTurno.find((x) => x.sigla === sigla);
+  return t
+    ? { nombre: t.nombre || sigla, color: t.color, desde: t.desde, hasta: t.hasta }
+    : { nombre: sigla };
+}
+
+/** Turnos que entran en la rotación automática (en orden de rotación). */
+export function turnosAutomaticos(): string[] {
+  return state.tiposTurno.filter((t) => t.automatico).map((t) => t.sigla);
 }
 
 // ---------------------------------------------------------- Copias de seguridad
@@ -619,7 +987,7 @@ function enRango(fecha: Fecha, ini: Fecha, finExcl: Fecha): boolean {
   return compare(fecha, ini) >= 0 && compare(fecha, finExcl) < 0;
 }
 
-/** Turno dominante de cada empleada en la semana anterior a `lunes`. */
+/** Turno dominante de cada empleado en la semana anterior a `lunes`. */
 function turnoDominanteSemanaAnterior(lunes: Fecha): Map<number, Turno> {
   const ini = addDays(lunes, -7);
   const mapa = new Map<number, Turno>();
@@ -632,9 +1000,10 @@ function turnoDominanteSemanaAnterior(lunes: Fecha): Map<number, Turno> {
     }
   }
   for (const [id, lista] of porEmp) {
-    const conteo: Record<Turno, number> = { M: 0, T: 0 };
-    for (const a of lista) conteo[a.turno]++;
-    mapa.set(id, conteo.T > conteo.M ? "T" : "M");
+    // Solo cuentan M y T: los turnos personalizados a mano no alteran la rotación.
+    const conteo: Record<string, number> = {};
+    for (const a of lista) conteo[a.turno] = (conteo[a.turno] ?? 0) + 1;
+    mapa.set(id, (conteo.T ?? 0) > (conteo.M ?? 0) ? "T" : "M");
   }
   return mapa;
 }
@@ -646,11 +1015,15 @@ function turnoDominanteSemanaAnterior(lunes: Fecha): Map<number, Turno> {
 export function regenerarFortnight(inicio: Fecha, silencioso = false): Hueco[] {
   const fin = addDays(inicio, 14);
   const manuales = state.asignaciones.filter(
-    (a) => a.origen === "manual" && enRango(a.fecha, inicio, fin));
+    (a) => a.origen !== "auto" && enRango(a.fecha, inicio, fin));
   const descansos = new Set<string>();
   for (const d of state.descansos) {
     const fecha = d.slice(d.indexOf("|") + 1);
     if (enRango(fecha, inicio, fin)) descansos.add(d);
+  }
+  const cerrados = new Set<string>();
+  for (const f of diasQuincena(inicio)) {
+    if (esDiaCerrado(f)) cerrados.add(f);
   }
   const previa = turnoDominanteSemanaAnterior(inicio);
   const plan = planificar({
@@ -659,7 +1032,9 @@ export function regenerarFortnight(inicio: Fecha, silencioso = false): Hueco[] {
     ausencias: state.ausencias,
     manuales,
     previa,
-    descansos
+    descansos,
+    tipos: state.tiposTurno,
+    cerrados
   });
 
   // Si el resultado no cambia (p. ej. al navegar a una quincena ya generada o
@@ -688,7 +1063,7 @@ export function regenerarFortnight(inicio: Fecha, silencioso = false): Hueco[] {
   const ventanaFin = addDays(inicio, 28);
   const restantes = state.asignaciones.filter((a) => {
     if (enRango(a.fecha, inicio, fin)) return false; // se reconstruye abajo
-    if (a.origen === "manual") return true;
+    if (a.origen !== "auto") return true;
     // automáticas: solo las cercanas (para alternancia previa y navegación ±)
     return compare(a.fecha, ventanaIni) >= 0 && compare(a.fecha, ventanaFin) <= 0;
   });
@@ -709,7 +1084,7 @@ export function ausenciasEnDia(fecha: Fecha): Ausencia[] {
   return state.ausencias.filter((a) => compare(a.inicio, fecha) <= 0 && compare(a.fin, fecha) >= 0);
 }
 
-/** Ausencia de una empleada concreta en una fecha. */
+/** Ausencia de un empleado concreto en una fecha. */
 export function ausenciaDeEmpleado(fecha: Fecha, empleadoId: number): Ausencia | undefined {
   return state.ausencias.find(
     (a) => a.empleadoId === empleadoId && compare(a.inicio, fecha) <= 0 && compare(a.fin, fecha) >= 0);
@@ -724,16 +1099,30 @@ export function asignacionDe(fecha: Fecha, empleadoId: number): Asignacion | und
 }
 
 /**
- * Edita el día de una empleada:
- *  * turno "M"|"T": fija ese turno (manual);
+ * Edita el día de un empleado:
+ *  * turno "M"|"T": fija ese turno a mano, con origen (empresa o intercambio
+ *    entre empleados) y comentario opcional;
  *  * turno null: descanso (sin asignación ese día).
  */
-export function editarDia(inicio: Fecha, fecha: Fecha, empleadoId: number, turno: Turno | null) {
+export function editarDia(
+  inicio: Fecha,
+  fecha: Fecha,
+  empleadoId: number,
+  turno: Turno | null,
+  origen: Exclude<Origen, "auto"> = "empresa",
+  comentario = ""
+) {
   state.asignaciones = state.asignaciones.filter(
     (a) => !(a.fecha === fecha && a.empleadoId === empleadoId));
   state.descansos = state.descansos.filter((d) => d !== `${empleadoId}|${fecha}`);
   if (turno) {
-    state.asignaciones.push({ fecha, turno, empleadoId, origen: "manual" });
+    state.asignaciones.push({
+      fecha,
+      turno,
+      empleadoId,
+      origen,
+      comentario: comentario.trim() || undefined
+    });
   } else {
     state.descansos.push(`${empleadoId}|${fecha}`);
   }
@@ -748,6 +1137,60 @@ export function restaurarAuto(inicio: Fecha, fecha: Fecha, empleadoId: number) {
   state.descansos = state.descansos.filter((d) => d !== `${empleadoId}|${fecha}`);
   guardar();
   regenerarFortnight(inicio);
+}
+
+/**
+ * Añade un tramo de planificación de la vista Avanzada a un empleado en un día.
+ * Un empleado puede tener varios tramos el mismo día (p. ej. 09:00–11:00 y
+ * 14:00–18:00), siempre que no se solapen entre sí. Devuelve "" si se guardó o
+ * un mensaje de error si las horas no son válidas o se solapan con otro tramo.
+ */
+export function guardarPlanAvanzado(
+  fecha: Fecha,
+  empleadoId: number,
+  desde: string,
+  hasta: string
+): string {
+  const a = normalizarHora(desde);
+  const b = normalizarHora(hasta);
+  if (!a || !b) return "Indica una hora de inicio y de fin válidas (HH:MM).";
+  if (a >= b) return "La hora de inicio debe ser anterior a la de fin.";
+  const solape = state.planAvanzada.find(
+    (p) =>
+      p.fecha === fecha &&
+      p.empleadoId === empleadoId &&
+      p.desde < b &&
+      p.hasta > a);
+  if (solape) {
+    return `Ese empleado ya trabaja de ${solape.desde} a ${solape.hasta} ese día: elige horas que no se solapen.`;
+  }
+  state.planAvanzada.push({
+    id: siguienteIdPlan(),
+    empleadoId,
+    fecha,
+    desde: a,
+    hasta: b
+  });
+  guardar();
+  return "";
+}
+
+/** Siguiente id numérico para un tramo nuevo de la vista Avanzada. */
+function siguienteIdPlan(): number {
+  return state.planAvanzada.reduce((max, p) => Math.max(max, p.id), 0) + 1;
+}
+
+/** Quita un tramo concreto (por id) de la vista Avanzada. */
+export function quitarPlanAvanzadoPorId(id: number) {
+  state.planAvanzada = state.planAvanzada.filter((p) => p.id !== id);
+  guardar();
+}
+
+/** Quita todos los tramos planificados de un empleado en un día de la vista Avanzada. */
+export function quitarPlanAvanzado(fecha: Fecha, empleadoId: number) {
+  state.planAvanzada = state.planAvanzada.filter(
+    (p) => !(p.fecha === fecha && p.empleadoId === empleadoId));
+  guardar();
 }
 
 /** Índice de la quincena siguiente/anterior para navegación. */

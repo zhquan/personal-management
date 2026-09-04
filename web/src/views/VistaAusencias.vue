@@ -168,7 +168,7 @@ const errorForm = ref("");
 
 function abrirNueva() {
   editar.value = null;
-  borrador.empleadoId = 0; // por defecto, sin empleada seleccionada
+  borrador.empleadoId = 0; // por defecto, sin empleado seleccionado
   borrador.tipo = "vacaciones";
   borrador.inicio = seleccionada.value ?? hoyISO;
   borrador.fin = seleccionada.value ?? hoyISO;
@@ -206,7 +206,7 @@ function esTiempoEnEdicion(): boolean {
 
 function guardar() {
   if (!borrador.empleadoId) {
-    errorForm.value = "Selecciona una empleada.";
+    errorForm.value = "Selecciona un empleado.";
     return;
   }
   if (borrador.tipo === "recuperable") {
@@ -332,7 +332,7 @@ const registrosPorFecha = computed<Map<Fecha, RegistroDia[]>>(() => {
   return mapa;
 });
 
-/** Registros a pintar en una celda concreta (ya ordenados por empleada). */
+/** Registros a pintar en una celda concreta (ya ordenados por empleado). */
 function registrosEn(f: Fecha | null): RegistroDia[] {
   if (!f) return [];
   return registrosPorFecha.value.get(f) ?? [];
@@ -343,7 +343,7 @@ function claveRegistro(r: RegistroDia): string {
 }
 
 function tituloRegistro(r: RegistroDia): string {
-  const nombre = r.emp ? nombreCompleto(r.emp) : "Empleada";
+  const nombre = r.emp ? nombreCompleto(r.emp) : "Empleado";
   if (r.clase === "ausencia") return `${nombre} · ${tipoNombre(r.aus.tipo)}`;
   return `${nombre} · Tiempo recuperable ${formatearTiempo(r.tiempo.minutos)} · ${descripcionSaldo(r.tiempo.minutos)}`;
 }
@@ -382,7 +382,7 @@ function claseSaldo(min: number): string {
     <header class="cabecera-pagina">
       <div>
         <h1>Vacaciones y ausencias</h1>
-        <p class="sub">Cada día muestra las ausencias y el tiempo recuperable de cada empleada · clic en un día para ver el detalle</p>
+        <p class="sub">Cada día muestra las ausencias y el tiempo recuperable de cada empleado · clic en un día para ver el detalle</p>
       </div>
       <div class="acciones-pagina">
         <button class="btn primario" @click="abrirNueva"><Icono nombre="mas" /> Registrar ausencia</button>
@@ -394,7 +394,7 @@ function claseSaldo(min: number): string {
         <section class="tarjeta calendario-mes-wrap">
           <div class="barra-filtros">
             <div class="filtro-campo">
-              <label for="filtro-empleada">Empleada</label>
+              <label for="filtro-empleada">Empleado</label>
               <select id="filtro-empleada" v-model="filtroBorrador.empleadoId">
                 <option :value="0">Todos</option>
                 <option v-for="e in empleados" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
@@ -484,7 +484,7 @@ function claseSaldo(min: number): string {
                 >{{ empleadoDe(a.empleadoId) ? iniciales(empleadoDe(a.empleadoId)!) : "?" }}</span>
                 <span class="detalles">
                   <span class="t1">
-                    {{ empleadoDe(a.empleadoId) ? nombreCompleto(empleadoDe(a.empleadoId)!) : "Empleada" }}
+                    {{ empleadoDe(a.empleadoId) ? nombreCompleto(empleadoDe(a.empleadoId)!) : "Empleado" }}
                   </span>
                   <span class="t2">
                     <span class="etiqueta-tipo" :style="{ background: tipoInfo(a.tipo).fondo, color: tipoInfo(a.tipo).tinta }">
@@ -506,7 +506,7 @@ function claseSaldo(min: number): string {
                 >{{ empleadoDe(t.empleadoId) ? iniciales(empleadoDe(t.empleadoId)!) : "?" }}</span>
                 <span class="detalles">
                   <span class="t1">
-                    {{ empleadoDe(t.empleadoId) ? nombreCompleto(empleadoDe(t.empleadoId)!) : "Empleada" }}
+                    {{ empleadoDe(t.empleadoId) ? nombreCompleto(empleadoDe(t.empleadoId)!) : "Empleado" }}
                   </span>
                   <span class="t2">
                     <span class="etiqueta-tipo" :style="{ background: RECUPERABLE_INFO.fondo, color: RECUPERABLE_INFO.tinta }">Tiempo recuperable</span>
@@ -547,7 +547,7 @@ function claseSaldo(min: number): string {
             <span class="punto" :style="{ background: item.emp?.color ?? '#888' }"></span>
             <span class="detalles">
               <span class="t1">
-                {{ item.emp ? nombreCompleto(item.emp) : "Empleada" }}
+                {{ item.emp ? nombreCompleto(item.emp) : "Empleado" }}
                 <span class="etiqueta-tipo" :style="{ background: tipoInfo(item.aus.tipo).fondo, color: tipoInfo(item.aus.tipo).tinta }">
                   {{ tipoInfo(item.aus.tipo).nombre }}
                 </span>
@@ -580,7 +580,7 @@ function claseSaldo(min: number): string {
             <span class="punto" :style="{ background: item.emp?.color ?? '#888' }"></span>
             <span class="detalles">
               <span class="t1">
-                {{ item.emp ? nombreCompleto(item.emp) : "Empleada" }}
+                {{ item.emp ? nombreCompleto(item.emp) : "Empleado" }}
                 <span
                   class="etiqueta"
                   :class="claseSaldo(item.t.minutos)"
@@ -608,9 +608,9 @@ function claseSaldo(min: number): string {
     >
       <div class="fila-form">
         <div class="campo">
-          <label>Empleada</label>
+          <label>Empleado</label>
           <select v-model.number="borrador.empleadoId">
-            <option :value="0" disabled>Selecciona la empleada…</option>
+            <option :value="0" disabled>Selecciona el empleado…</option>
             <option v-for="e in empleados" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
           </select>
         </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Ausencia, Empleado } from "./types";
-import { plantillaEmpleado } from "./types";
+import { plantillaEmpleado, TIPOS_TURNO_BASE } from "./types";
 import { planificar } from "./scheduler";
 import { addDays } from "./dates";
 
@@ -28,7 +28,7 @@ function asignacionesDe(result: ReturnType<typeof planificar>, fecha: string) {
 }
 
 describe("planificador: todo el personal queda asignado", () => {
-  it("asigna todas las empleadas cada día", () => {
+  it("asigna a todos los empleados cada día", () => {
     const r = plan();
     for (let i = 0; i < 14; i++) {
       const fecha = addDays(INICIO, i);
@@ -39,7 +39,7 @@ describe("planificador: todo el personal queda asignado", () => {
     expect(r.auto).toHaveLength(14 * 5);
   });
 
-  it("ninguna empleada trabaja dos turnos el mismo día", () => {
+  it("ningún empleado trabaja dos turnos el mismo día", () => {
     const r = plan();
     for (let i = 0; i < 14; i++) {
       const porEmp = new Map<number, number>();
@@ -62,7 +62,7 @@ describe("planificador: todo el personal queda asignado", () => {
 });
 
 describe("planificador: alternancia semanal", () => {
-  it("una empleada alterna M una semana y T la siguiente", () => {
+  it("un empleado alterna M una semana y T la siguiente", () => {
     const r = plan();
     const mariaSem1 = r.auto.filter((a) => a.empleadoId === 1 && a.fecha < "2026-09-14");
     const mariaSem2 = r.auto.filter((a) => a.empleadoId === 1 && a.fecha >= "2026-09-14");
@@ -99,7 +99,7 @@ describe("planificador: alternancia semanal", () => {
 });
 
 describe("planificador: ausencias y descansos", () => {
-  it("la empleada de vacaciones no se asigna esos días", () => {
+  it("el empleado de vacaciones no se asigna esos días", () => {
     const ausencias: Ausencia[] = [
       { id: 1, empleadoId: 1, inicio: "2026-09-08", fin: "2026-09-10", tipo: "vacaciones" }
     ];
@@ -123,14 +123,14 @@ describe("planificador: ausencias y descansos", () => {
 });
 
 describe("planificador: manuales y celdas vacías", () => {
-  it("conserva las asignaciones manuales y no duplica a la empleada", () => {
+  it("conserva las asignaciones manuales y no duplica al empleado", () => {
     const manuales = [
-      { fecha: "2026-09-08", turno: "M" as const, empleadoId: 3, origen: "manual" as const }
+      { fecha: "2026-09-08", turno: "M" as const, empleadoId: 3, origen: "empresa" as const }
     ];
     const r = plan({ manuales });
     const delDia = r.auto.filter((a) => a.fecha === "2026-09-08" && a.empleadoId === 3);
     expect(delDia).toHaveLength(0); // la manual no se repite en auto
-    // el resto del día sigue cubierto: 5 empleadas → manual 3 + 4 auto
+    // el resto del día sigue cubierto: 5 empleados → manual 3 + 4 auto
     const totalDia = r.auto.filter((a) => a.fecha === "2026-09-08").length + 1;
     expect(totalDia).toBe(5);
   });
@@ -143,7 +143,7 @@ describe("planificador: manuales y celdas vacías", () => {
 });
 
 describe("planificador: equilibrio y cobertura", () => {
-  it("reparte a todo el equipo aunque sobren empleadas para un turno", () => {
+  it("reparte a todo el equipo aunque sobren empleados para un turno", () => {
     const equipo = [
       empleado({ id: 1, nombre: "María" }),
       empleado({ id: 2, nombre: "Lucía" }),
@@ -154,7 +154,7 @@ describe("planificador: equilibrio y cobertura", () => {
       empleado({ id: 7, nombre: "Andrea" })
     ];
     const r = planificar({ inicio: INICIO, empleados: equipo, ausencias: [] });
-    // 7 empleadas: ni un solo día puede faltar nadie
+    // 7 empleados: ni un solo día puede faltar nadie
     for (let i = 0; i < 14; i++) {
       expect(asignacionesDe(r, addDays(INICIO, i))).toHaveLength(7);
     }
@@ -177,5 +177,72 @@ describe("planificador: equilibrio y cobertura", () => {
     const r = plan({ ausencias });
     const huecosDia = r.huecos.filter((h) => h.fecha === "2026-09-09");
     expect(huecosDia.length).toBeGreaterThan(0);
+  });
+});
+
+describe("planificador: días de cierre de la empresa", () => {
+  it("no programa a nadie (ni genera huecos) en los días cerrados", () => {
+    const r = plan({ cerrados: new Set(["2026-09-08", "2026-09-15"]) });
+    for (const fecha of ["2026-09-08", "2026-09-15"]) {
+      expect(asignacionesDe(r, fecha)).toHaveLength(0);
+      expect(r.huecos.some((h) => h.fecha === fecha)).toBe(false);
+    }
+    // El resto de la quincena sigue cubierta al completo.
+    expect(r.auto).toHaveLength(12 * 5);
+    expect(asignacionesDe(r, "2026-09-09")).toHaveLength(5);
+  });
+
+  it("un cierre total de la quincena no deja ninguna asignación", () => {
+    const cerrados = new Set<string>();
+    for (let i = 0; i < 14; i++) cerrados.add(addDays(INICIO, i));
+    const r = plan({ cerrados });
+    expect(r.auto).toHaveLength(0);
+    expect(r.huecos).toHaveLength(0);
+  });
+});
+
+describe("planificador: tipos de turno personalizados automáticos", () => {
+  // La lista completa que llega del almacén: Mañana/Tarde (base) + Noche.
+  const TIPOS = [...TIPOS_TURNO_BASE, { id: 1, nombre: "Noche", sigla: "N", color: "#1F2937", automatico: true }];
+
+  it("rota M → T → N semana a semana y cubre los tres turnos", () => {
+    const r = plan({ tipos: TIPOS });
+    const sem1 = new Set(r.auto.filter((a) => a.fecha < "2026-09-14").map((a) => a.turno));
+    const sem2 = new Set(r.auto.filter((a) => a.fecha >= "2026-09-14").map((a) => a.turno));
+    expect(sem1).toEqual(new Set(["M", "T", "N"]));
+    expect(sem2).toEqual(new Set(["M", "T", "N"]));
+    expect(r.auto).toHaveLength(14 * 5); // nadie se queda sin turno
+  });
+
+  it("cada empleado avanza al siguiente turno de la rotación cada semana", () => {
+    const r = plan({ tipos: TIPOS });
+    for (const emp of POR_DEFECTO) {
+      const sem1 = r.auto.filter((a) => a.empleadoId === emp.id && a.fecha < "2026-09-14");
+      const sem2 = r.auto.filter((a) => a.empleadoId === emp.id && a.fecha >= "2026-09-14");
+      const t1 = sem1[0].turno;
+      const t2 = sem2[0].turno;
+      expect(new Set(sem1.map((a) => a.turno))).toEqual(new Set([t1])); // semana uniforme
+      expect(new Set(sem2.map((a) => a.turno))).toEqual(new Set([t2]));
+      // M→T, T→N, N→M
+      const siguiente = t1 === "M" ? "T" : t1 === "T" ? "N" : "M";
+      expect(t2).toBe(siguiente);
+    }
+  });
+
+  it("si se borra Mañana, la rotación queda T → N sin asignar M", () => {
+    const sinManana = [...TIPOS_TURNO_BASE.filter((t) => t.sigla !== "M"),
+      { id: 1, nombre: "Noche", sigla: "N", color: "#1F2937", automatico: true }];
+    const r = plan({ tipos: sinManana });
+    const turnos = new Set(r.auto.map((a) => a.turno));
+    expect(turnos.has("M")).toBe(false);
+    expect(turnos).toEqual(new Set(["T", "N"]));
+    expect(r.auto).toHaveLength(14 * 5); // nadie se queda sin turno
+    // Alternancia semanal sobre los turnos restantes: T → N → T…
+    for (const emp of POR_DEFECTO) {
+      const sem1 = r.auto.filter((a) => a.empleadoId === emp.id && a.fecha < "2026-09-14");
+      const sem2 = r.auto.filter((a) => a.empleadoId === emp.id && a.fecha >= "2026-09-14");
+      const siguiente = sem1[0].turno === "T" ? "N" : "T";
+      expect(new Set(sem2.map((a) => a.turno))).toEqual(new Set([siguiente]));
+    }
   });
 });

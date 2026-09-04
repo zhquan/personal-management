@@ -5,21 +5,24 @@ import VistaPlantilla from "./views/VistaPlantilla.vue";
 import VistaCalendario from "./views/VistaCalendario.vue";
 import VistaAusencias from "./views/VistaAusencias.vue";
 import VistaMantenimiento from "./views/VistaMantenimiento.vue";
+import VistaAjustes from "./views/VistaAjustes.vue";
 
-type Seccion = "plantilla" | "calendario" | "ausencias" | "mantenimiento";
+type Seccion = "plantilla" | "calendario" | "ausencias" | "mantenimiento" | "ajustes";
 
 const secciones: { id: Seccion; etiqueta: string; icono: string }[] = [
   { id: "plantilla", etiqueta: "Plantilla", icono: "personas" },
   { id: "calendario", etiqueta: "Calendario de turnos", icono: "calendario" },
   { id: "ausencias", etiqueta: "Vacaciones y ausencias", icono: "sol" },
-  { id: "mantenimiento", etiqueta: "Mantenimiento", icono: "engranaje" }
+  { id: "mantenimiento", etiqueta: "Mantenimiento", icono: "engranaje" },
+  { id: "ajustes", etiqueta: "Ajustes", icono: "ajustes" }
 ];
 
 const componente: Record<Seccion, Component> = {
   plantilla: VistaPlantilla,
   calendario: VistaCalendario,
   ausencias: VistaAusencias,
-  mantenimiento: VistaMantenimiento
+  mantenimiento: VistaMantenimiento,
+  ajustes: VistaAjustes
 };
 
 function seccionDesdeHash(): Seccion {

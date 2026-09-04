@@ -36,18 +36,39 @@ describe("PDF calendario", () => {
     expect(head).toContain("%PDF");
   });
 
-  it("marca las celdas manuales con borde", () => {
+  it("marca las celdas fijadas a mano con borde según su origen", () => {
     const manual: FilaPdf = {
       nombre: "Sofía Jiménez",
       color: "#F4511E",
       celdas: [
-        { turno: "M", clase: "turno", manual: true },
+        { turno: "M", clase: "turno", origen: "empresa" },
         { turno: null, clase: "descanso" },
-        { turno: "T", clase: "turno" },
-        ...Array.from({ length: 11 }, () => ({ turno: null as "M" | "T" | null, clase: "vacio" as const }))
+        { turno: "T", clase: "turno", origen: "intercambio" },
+        { turno: "M", clase: "turno" },
+        ...Array.from({ length: 10 }, () => ({ turno: null as "M" | "T" | null, clase: "vacio" as const }))
       ]
     };
     const doc = construirPdfCalendario({ inicio: "2026-09-07", filas: [manual] });
     expect(doc.getNumberOfPages()).toBe(1);
+  });
+
+  it("dibuja ausencias y días cerrados con rayado sin errores", () => {
+    const filas: FilaPdf[] = [
+      {
+        nombre: "Ana Ruiz",
+        color: "#26A69A",
+        celdas: [
+          { turno: null, clase: "ausencia", sigla: "V" },
+          { turno: null, clase: "ausencia", sigla: "B" },
+          { turno: null, clase: "cerrado" },
+          { turno: "M", clase: "turno" },
+          ...Array.from({ length: 10 }, () => ({ turno: null as "M" | "T" | null, clase: "vacio" as const }))
+        ]
+      }
+    ];
+    const doc = construirPdfCalendario({ inicio: "2026-09-07", filas });
+    expect(doc.getNumberOfPages()).toBe(1);
+    const out = doc.output("arraybuffer");
+    expect(out.byteLength).toBeGreaterThan(1000);
   });
 });

@@ -141,7 +141,7 @@ const kb = (c: CopiaGuardada) => Math.max(1, Math.round(JSON.stringify(c.datos).
       </div>
     </header>
 
-    <div class="grid-mant">
+    <div class="fila-mant-1">
       <!-- Exportar -->
       <section class="tarjeta" style="padding: 18px">
         <h3 class="titulo-tarjeta"><Icono nombre="descargar" :tam="15" /> Exportar base de datos</h3>
@@ -168,47 +168,47 @@ const kb = (c: CopiaGuardada) => Math.max(1, Math.round(JSON.stringify(c.datos).
         </div>
         <p v-if="avisoImport" class="nota" :class="avisoImport.tipo === 'ok' ? 'nota-ok' : 'nota-error'">{{ avisoImport.texto }}</p>
       </section>
-
-      <!-- Planificar copias -->
-      <section class="tarjeta plan-copias" style="padding: 18px">
-        <h3 class="titulo-tarjeta"><Icono nombre="alarma" :tam="15" /> Planificar copias de seguridad</h3>
-        <p class="descripcion">
-          La app guarda automáticamente copias internas con la frecuencia elegida (se comprueba al
-          abrirla y cada hora mientras esté abierta) y conserva las últimas {{ plan.maxCopias }}.
-        </p>
-
-        <div class="linea-plan">
-          <label class="interruptor">
-            <input v-model="plan.activo" type="checkbox" />
-            <span>Copias automáticas</span>
-          </label>
-        </div>
-
-        <div class="grid-plan">
-          <div class="campo">
-            <label>Frecuencia</label>
-            <select v-model="plan.frecuencia" :disabled="!plan.activo">
-              <option v-for="f in FRECUENCIAS" :key="f.id" :value="f.id">{{ f.nombre }}</option>
-            </select>
-          </div>
-          <div class="campo">
-            <label>Conservar últimas copias</label>
-            <input v-model.number="plan.maxCopias" type="number" min="1" max="30" :disabled="!plan.activo" />
-          </div>
-        </div>
-
-        <p class="resumen-plan">{{ proximaCopia }}</p>
-
-        <div class="pie-accion">
-          <button class="btn primario" @click="copiarAhora"><Icono nombre="recargar" :tam="15" /> Hacer copia ahora</button>
-          <button class="btn" :disabled="!plan.activo" @click="guardarPlan">Guardar plan</button>
-        </div>
-        <p v-if="avisoPlan" class="nota" :class="avisoPlan.tipo === 'ok' ? 'nota-ok' : 'nota-error'">{{ avisoPlan.texto }}</p>
-      </section>
     </div>
 
+    <!-- Planificar copias -->
+    <section class="tarjeta plan-copias" style="padding: 18px">
+      <h3 class="titulo-tarjeta"><Icono nombre="alarma" :tam="15" /> Planificar copias de seguridad</h3>
+      <p class="descripcion">
+        La app guarda automáticamente copias internas con la frecuencia elegida (se comprueba al
+        abrirla y cada hora mientras esté abierta) y conserva las últimas {{ plan.maxCopias }}.
+      </p>
+
+      <div class="linea-plan">
+        <label class="interruptor">
+          <input v-model="plan.activo" type="checkbox" />
+          <span>Copias automáticas</span>
+        </label>
+      </div>
+
+      <div class="grid-plan">
+        <div class="campo">
+          <label>Frecuencia</label>
+          <select v-model="plan.frecuencia" :disabled="!plan.activo">
+            <option v-for="f in FRECUENCIAS" :key="f.id" :value="f.id">{{ f.nombre }}</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label>Conservar últimas copias</label>
+          <input v-model.number="plan.maxCopias" type="number" min="1" max="30" :disabled="!plan.activo" />
+        </div>
+      </div>
+
+      <p class="resumen-plan">{{ proximaCopia }}</p>
+
+      <div class="pie-accion">
+        <button class="btn primario" @click="copiarAhora"><Icono nombre="recargar" :tam="15" /> Hacer copia ahora</button>
+        <button class="btn" :disabled="!plan.activo" @click="guardarPlan">Guardar plan</button>
+      </div>
+      <p v-if="avisoPlan" class="nota" :class="avisoPlan.tipo === 'ok' ? 'nota-ok' : 'nota-error'">{{ avisoPlan.texto }}</p>
+    </section>
+
     <!-- Copias guardadas -->
-    <section class="tarjeta" style="margin-top: 18px; padding: 18px">
+    <section class="tarjeta" style="padding: 18px">
       <h3 class="titulo-tarjeta" style="margin-bottom: 12px">
         Copias guardadas
         <span class="contador" v-if="copias.length">{{ copias.length }}</span>
@@ -219,7 +219,7 @@ const kb = (c: CopiaGuardada) => Math.max(1, Math.round(JSON.stringify(c.datos).
           <div class="copia-info">
             <div style="font-size: 13px; font-weight: 600">{{ fmtFechaHora(c.creado) }}</div>
             <div style="font-size: 11.5px; color: var(--apagado)">
-              {{ c.resumen.empleados }} empleadas · {{ c.resumen.ausencias }} ausencias ·
+              {{ c.resumen.empleados }} empleados · {{ c.resumen.ausencias }} ausencias ·
               {{ c.resumen.tiempos }} apuntes · {{ kb(c) }} KB
             </div>
           </div>
@@ -237,11 +237,11 @@ const kb = (c: CopiaGuardada) => Math.max(1, Math.round(JSON.stringify(c.datos).
 </template>
 
 <style scoped>
-.grid-mant {
+.fila-mant-1 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .titulo-tarjeta {
@@ -303,10 +303,15 @@ const kb = (c: CopiaGuardada) => Math.max(1, Math.round(JSON.stringify(c.datos).
   margin-left: 6px;
 }
 
+/* La lista crece hacia abajo; con el scroll interno la página no se alarga sin fin
+   aunque se acumulen muchas copias guardadas. */
 .lista-copias {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 .fila-copia {
   display: flex;

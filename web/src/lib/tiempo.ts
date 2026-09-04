@@ -1,6 +1,6 @@
 // Utilidades de tiempo recuperable en formato «+2:30» / «-1:00».
 // La unidad interna son minutos con signo: negativo = horas extra realizadas;
-// positivo = horas que la empleada debe a la empresa.
+// positivo = horas que el empleado debe a la empresa.
 
 /** Parsea «+2:30», «-1:00», «2:30» o «0:45» a minutos con signo (null si no es válido). */
 export function parsearTiempo(texto: string): number | null {
@@ -24,7 +24,7 @@ export function formatearTiempo(minutos: number): string {
 
 /** Leyenda textual del signo, para tooltips. */
 export function descripcionSaldo(minutos: number): string {
-  if (minutos < 0) return "Horas extra realizadas (a favor de la empleada)";
+  if (minutos < 0) return "Horas extra realizadas (a favor del empleado)";
   if (minutos > 0) return "Debe horas a la empresa";
   return "Saldo a cero";
 }

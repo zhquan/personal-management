@@ -1,17 +1,21 @@
-import type { Asignacion, Ausencia, Empleado, Hueco, PlanResultado, Turno } from "./types";
+import type { Asignacion, Ausencia, Empleado, Hueco, PlanResultado, TipoTurno, Turno } from "./types";
+import { TIPOS_TURNO_BASE } from "./types";
 import { addDays, compare, diasQuincena, inicioDeIndice } from "./dates";
 
 /**
  * Planificador de turnos para un período quincenal (14 días: lunes a domingo ×2).
  *
  * Normas:
- *  * Todo el personal dado de alta queda asignado cada día a un turno (M o T).
- *  * Un mismo turno puede tener varias empleadas.
- *  * Alternancia semanal: si una empleada cubre mañana una semana, la siguiente
- *    le corresponde la tarde (y viceversa).
+ *  * Todo el personal dado de alta queda asignado cada día a un turno.
+ *  * Un mismo turno puede tener varios empleados.
+ *  * Rotación semanal: si un empleado cubre mañana una semana, la siguiente le
+ *    corresponde el siguiente turno de la rotación (T, y así con los turnos
+ *    personalizados marcados como automáticos). Si Mañana o Tarde se han
+ *    borrado en Ajustes, no entran en la rotación.
  *  * Reajuste automático: se reparte al personal de forma equilibrada priorizando
  *    su turno semanal pero garantizando la cobertura mínima de cada turno.
- *  * Se respetan las asignaciones manuales, los descansos y las celdas vacías forzadas.
+ *  * Se respetan las asignaciones manuales, los descansos, las celdas vacías
+ *    forzadas y los días en que la empresa cierra (no se programa a nadie).
  */
 export interface PlanificarParams {
   inicio: string;
@@ -19,12 +23,16 @@ export interface PlanificarParams {
   ausencias: Ausencia[];
   /** Asignaciones manuales ya existentes en el período. */
   manuales?: Asignacion[];
-  /** Turno dominante de cada empleada la semana anterior. */
+  /** Turno dominante de cada empleado la semana anterior. */
   previa?: Map<number, Turno>;
   /** Celdas (fecha|turno) que deben quedar deliberadamente sin personal. */
   vacias?: Set<string>;
   /** Días de descanso: cadena `${empleadoId}|${fecha}`. */
   descansos?: Set<string>;
+  /** Tipos de turno definidos (base + personalizados); solo entran los automáticos. */
+  tipos?: TipoTurno[];
+  /** Fechas (ISO) en que la empresa está cerrada: ese día no se programa a nadie. */
+  cerrados?: Set<string>;
   cobertura?: number;
 }
 
@@ -36,6 +44,8 @@ export function planificar({
   previa,
   vacias = new Set(),
   descansos = new Set(),
+  tipos,
+  cerrados = new Set(),
   cobertura = 1
 }: PlanificarParams): PlanResultado {
   const objetivo = Math.max(1, cobertura);
@@ -43,7 +53,21 @@ export function planificar({
   const dias = diasQuincena(inicio);
   const resultado: PlanResultado = { auto: [], huecos: [], sem1: {}, sem2: {} };
 
-  // Empleadas de alta en parte del período.
+  // Rotación automática: la lista de turnos definidos marcados como automáticos
+  // (Mañana y Tarde al principio; si se borraron en Ajustes, no aparecen).
+  const definidos: TipoTurno[] = tipos ?? TIPOS_TURNO_BASE;
+  const rotacion: Turno[] = definidos.filter((t) => t.automatico).map((t) => t.sigla);
+  if (rotacion.length === 0) return resultado; // sin turnos automáticos no hay nada que programar
+
+  function siguienteEnRotacion(t: Turno): Turno {
+    const i = rotacion.indexOf(t);
+    return rotacion[(i + 1) % rotacion.length];
+  }
+  function vaciarConteo(): Record<Turno, number> {
+    return Object.fromEntries(rotacion.map((t) => [t, 0]));
+  }
+
+  // Empleados de alta en parte del período.
   const activas = empleados
     .filter((e) => {
       if (compare(e.alta, fin) >= 0) return false;
@@ -62,21 +86,22 @@ export function planificar({
     return true;
   }
 
-  // --- 1) Turno semanal de cada empleada ------------------------------------
-  // Alternancia: quien viene de mañana pasa a tarde la primera semana (y al
-  // revés). Sin historial previo se reparten para equilibrar el equipo.
-  let semilla: Record<Turno, number> = { M: 0, T: 0 };
+  // --- 1) Turno semanal de cada empleado ------------------------------------
+  // Rotación semanal: quien viene de mañana pasa a tarde la primera semana, y
+  // quien viene de tarde pasa al siguiente turno de la rotación (y así con los
+  // personalizados). Sin historial previo se reparten para equilibrar el equipo.
+  let semilla: Record<Turno, number> = vaciarConteo();
   for (const e of activas) {
     let w0: Turno;
     if (previa && previa.has(e.id)) {
-      w0 = previa.get(e.id)! === "M" ? "T" : "M"; // norma general: alterna cada semana
+      w0 = siguienteEnRotacion(previa.get(e.id)!);
     } else {
-      w0 = semilla.M <= semilla.T ? "M" : "T";
+      // El turno con menos personal asignado hasta ahora (el primero si hay empate).
+      w0 = rotacion.reduce((min, t) => (semilla[t] < semilla[min] ? t : min), rotacion[0]);
     }
     semilla[w0]++;
-    const w1: Turno = w0 === "M" ? "T" : "M";
     resultado.sem1[e.id] = w0;
-    resultado.sem2[e.id] = w1;
+    resultado.sem2[e.id] = siguienteEnRotacion(w0);
   }
 
   function turnoSemanalDe(id: number, semana: number): Turno {
@@ -98,10 +123,13 @@ export function planificar({
     const fecha = dias[idx];
     const semana = idx < 7 ? 0 : 1;
 
+    // Día de cierre de la empresa: no se programa a nadie (lo manual se conserva).
+    if (cerrados.has(fecha)) continue;
+
     const manualesHoy = manualesPorDia.get(fecha) ?? [];
     const ocupadas = new Set(manualesHoy.map((m) => m.empleadoId));
-    const conteo: Record<Turno, number> = { M: 0, T: 0 };
-    for (const m of manualesHoy) conteo[m.turno]++;
+    const conteo: Record<Turno, number> = vaciarConteo();
+    for (const m of manualesHoy) conteo[m.turno] = (conteo[m.turno] ?? 0) + 1;
 
     function cerrada(t: Turno): boolean {
       return vacias.has(`${fecha}|${t}`);
@@ -109,7 +137,7 @@ export function planificar({
 
     function asignar(e: Empleado, t: Turno) {
       ocupadas.add(e.id);
-      conteo[t]++;
+      conteo[t] = (conteo[t] ?? 0) + 1;
       resultado.auto.push({ fecha, turno: t, empleadoId: e.id, origen: "auto" });
     }
 
@@ -119,47 +147,47 @@ export function planificar({
 
     const flex = [...disponibles];
 
-    // 1) Turno semanal: cada empleada cubre la semana que le toca (M o T), salvo
-    // que ese turno esté cerrado a propósito (entonces va al otro turno abierto).
+    // 1) Turno semanal: cada empleado cubre el turno que le toca esa semana; si
+    // ese turno está cerrado a propósito, pasa al primer turno abierto.
     for (const e of flex) {
       const preferido = turnoSemanalDe(e.id, semana);
-      const opuesto: Turno = preferido === "M" ? "T" : "M";
-      if (cerrada(preferido) && !cerrada(opuesto)) {
-        asignar(e, opuesto);
-      } else if (cerrada(preferido) && cerrada(opuesto)) {
-        // Ambos turnos cerrados: se respeta y no se programa a nadie extra.
+      if (cerrada(preferido)) {
+        const abierto = rotacion.find((t) => !cerrada(t));
+        if (abierto) asignar(e, abierto);
+        // Todos los turnos cerrados: se respeta y no se programa a nadie extra.
       } else {
         asignar(e, preferido);
       }
     }
 
     // 2) Reajuste automático: si un turno abierto se queda sin la cobertura
-    // mínima (por ausencias o descansos de última hora), se mueve personal del
-    // otro turno para cubrirlo, sin vaciar el turno de origen por debajo del mínimo.
+    // mínima (por ausencias o descansos de última hora), se mueve personal de
+    // otro turno con excedente para cubrirlo, sin vaciar el de origen del mínimo.
     const porTurno = (t: Turno) => disponibles.filter((e) =>
       resultado.auto.some((a) => a.fecha === fecha && a.empleadoId === e.id && a.turno === t));
-    for (const turno of ["M", "T"] as Turno[]) {
+    for (const turno of rotacion) {
       if (cerrada(turno)) continue;
-      const opuesto: Turno = turno === "M" ? "T" : "M";
-      while (conteo[turno] < objetivo && conteo[opuesto] > objetivo && !cerrada(opuesto)) {
-        const candidato = porTurno(opuesto).sort((a, b) => a.id - b.id)[0];
+      while ((conteo[turno] ?? 0) < objetivo) {
+        const origen = rotacion.find((t) => t !== turno && !cerrada(t) && (conteo[t] ?? 0) > objetivo);
+        if (!origen) break;
+        const candidato = porTurno(origen).sort((a, b) => a.id - b.id)[0];
         if (!candidato) break;
-        conteo[opuesto]--;
+        conteo[origen]--;
         conteo[turno]++;
         const idx = resultado.auto.findIndex(
-          (a) => a.fecha === fecha && a.empleadoId === candidato.id && a.turno === opuesto);
+          (a) => a.fecha === fecha && a.empleadoId === candidato.id && a.turno === origen);
         if (idx >= 0) resultado.auto[idx] = { fecha, turno, empleadoId: candidato.id, origen: "auto" };
       }
     }
 
     // Huecos: solo cuentan los turnos no cerrados a propósito.
-    for (const turno of ["M", "T"] as Turno[]) {
+    for (const turno of rotacion) {
       if (cerrada(turno)) continue;
-      if (conteo[turno] < objetivo) {
+      if ((conteo[turno] ?? 0) < objetivo) {
         resultado.huecos.push({
           fecha,
           turno,
-          motivo: disponibles.length === 0 ? "No hay personal disponible ese día" : "No hay personal suficiente para cubrir ambos turnos"
+          motivo: disponibles.length === 0 ? "No hay personal disponible ese día" : "No hay personal suficiente para cubrir todos los turnos"
         });
       }
     }

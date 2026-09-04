@@ -20,7 +20,7 @@
   --manana: #f6c453;
   --manana-suave: #fdf3d7;
   --manana-tinta: #7a5a08;
-  --tarde: #3b4bd8;
+  --tarde: #aecdf5; /* celeste */
   --tarde-suave: #e4e9ff;
   --tarde-tinta: #2b3aab;
 
@@ -30,6 +30,12 @@
   --aviso-suave: #fef3e0;
   --peligro: #dc2626;
   --peligro-suave: #fdecec;
+
+  /* Origen de un turno fijado a mano: cambio de la empresa (rojo) e intercambio entre empleados (marrón). */
+  --empresa: #dc2626;
+  --empresa-suave: #fdecec;
+  --intercambio: #8d6e63;
+  --intercambio-suave: #f3e7de;
 
   --sombra-suave: 0 1px 2px rgba(20, 26, 46, 0.05), 0 4px 14px rgba(20, 26, 46, 0.05);
   --sombra-flotante: 0 6px 24px rgba(20, 26, 46, 0.14);
@@ -190,9 +196,13 @@ h1, h2, h3, p { margin: 0; }
 .btn-redondo-nav:disabled { opacity: 0.35; cursor: default; }
 
 /* ------------------------------------------------------------ Campos */
-.campo { display: flex; flex-direction: column; gap: 5px; }
+/* min-width: 0 permite que los campos en columnas estrechas (grid/flex)
+   se encojan en vez de desbordar el cuadro que los contiene. */
+.campo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .campo > label { font-size: 12px; font-weight: 600; color: var(--subtitulo); }
 .campo input, .campo select, .campo textarea {
+  min-width: 0;
+  width: 100%;
   border: 1px solid var(--borde);
   border-radius: 9px;
   padding: 8px 11px;
@@ -246,7 +256,7 @@ h1, h2, h3, p { margin: 0; }
   user-select: none;
 }
 .toggle-par .chip-toggle.mañana.activo { background: var(--manana); border-color: #e0b13c; color: var(--manana-tinta); }
-.toggle-par .chip-toggle.tarde.activo { background: var(--tarde); border-color: var(--tarde); color: #fff; }
+.toggle-par .chip-toggle.tarde.activo { background: var(--tarde); border-color: var(--tarde); color: var(--tarde-tinta); }
 
 /* ---------------------------------------------------------- Paleta color */
 .paleta {
@@ -341,6 +351,10 @@ h1, h2, h3, p { margin: 0; }
   border-spacing: 0;
   width: 100%;
   min-width: 920px;
+  /* Laterales de ancho fijo: las 14 columnas de día reparten por igual el
+     espacio restante, así un día cerrado (con ✕ en la cabecera) no ensancha
+     su columna respecto a las demás. */
+  table-layout: fixed;
 }
 .tabla-quincena th, .tabla-quincena td {
   border-right: 1px solid var(--borde-suave);
@@ -353,6 +367,16 @@ h1, h2, h3, p { margin: 0; }
 .tabla-quincena thead th { position: sticky; top: 0; background: var(--superficie-2); z-index: 5; font-size: 11.5px; }
 .tabla-quincena thead th.sep-semana { background: var(--acento-suave); color: var(--acento); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
 .tabla-quincena thead th.dia { background: var(--superficie-2); color: var(--subtitulo); font-weight: 600; padding: 7px 4px 6px; }
+/* Semana 2: cabecera con tinte propio y divisor grueso entre semanas. */
+.tabla-quincena thead th.dia.inicio-semana {
+  background: var(--acento-suave);
+  color: var(--acento);
+  border-left: 4px solid var(--acento-borde);
+}
+.tabla-quincena td.celda-turno.inicio-semana { border-left: 4px solid var(--acento-borde); }
+/* Si el primer día de la semana 2 es hoy, el rectángulo verde manda. */
+.tabla-quincena td.celda-turno.hoy.inicio-semana { border-left: 2px solid var(--ok); }
+.tabla-quincena thead th.dia.hoy.inicio-semana { border-left: 2px solid var(--ok); }
 .tabla-quincena thead th.dia.domingo { color: var(--peligro); }
 .tabla-quincena thead th.nombre-col { background: var(--superficie); border-right: 1px solid var(--borde); }
 .celda-empleada {
@@ -363,7 +387,9 @@ h1, h2, h3, p { margin: 0; }
   text-align: left;
   padding: 6px 10px !important;
   border-right: 1px solid var(--borde) !important;
-  min-width: 178px;
+  /* El ancho real lo fija la fila de cabecera (medido al nombre más largo);
+     aquí solo garantizamos un mínimo cómodo. */
+  min-width: 210px;
 }
 .celda-empleada .nom {
   display: flex;
@@ -371,7 +397,10 @@ h1, h2, h3, p { margin: 0; }
   gap: 8px;
   font-weight: 600;
   font-size: 12.5px;
+  /* Nombre completo siempre en una sola línea; la columna se dimensiona al
+     nombre más largo para que nunca se recorte. */
   white-space: nowrap;
+  line-height: 1.25;
 }
 .celda-turno {
   height: 34px;
@@ -384,12 +413,41 @@ h1, h2, h3, p { margin: 0; }
 }
 .celda-turno:hover { filter: brightness(0.94); }
 .celda-turno.manana { background: var(--manana-suave); color: var(--manana-tinta); }
-.celda-turno.tarde { background: var(--tarde); color: #fff; }
+.celda-turno.tarde { background: var(--tarde); color: var(--tarde-tinta); }
 .celda-turno.descanso { background: var(--superficie-2); color: var(--apagado); }
 .celda-turno.ausencia { background: repeating-linear-gradient(45deg, #faf6f6, #faf6f6 6px, #f1ecec 6px, #f1ecec 12px); color: #8d6e6e; }
-.celda-turno.manual { outline-color: var(--acento); }
-.celda-turno.hoy { box-shadow: inset 0 0 0 2px var(--acento); }
 .celda-turno.vacia { background: #fff; cursor: default; }
+/* Día de cierre de la empresa: sin actividad. */
+.celda-turno.cerrado {
+  background: repeating-linear-gradient(45deg, #f4f5f9, #f4f5f9 6px, #eceef4 6px, #eceef4 12px);
+  color: var(--apagado);
+  cursor: default;
+}
+.celda-turno.cerrado:hover { filter: none; }
+/* Turno fijado a mano: solo el borde y la letra en rojo (empresa) o marrón (intercambio);
+   el fondo conserva el color del turno. */
+.celda-turno.empresa {
+  color: var(--empresa);
+  box-shadow: inset 0 0 0 2px var(--empresa);
+}
+.celda-turno.intercambio {
+  color: var(--intercambio);
+  box-shadow: inset 0 0 0 2px var(--intercambio);
+}
+/* Columna de hoy: un único rectángulo verde que recorre la columna entera
+   (cabecera incluida); las líneas internas de la columna desaparecen. */
+.tabla-quincena td.celda-turno.hoy {
+  border-left: 2px solid var(--ok);
+  border-right: 2px solid var(--ok);
+  border-bottom: none;
+}
+.tabla-quincena tbody tr:last-child td.celda-turno.hoy {
+  border-bottom: 2px solid var(--ok);
+}
+/* El vecino de la izquierda pierde su línea fina para que el rectángulo quede limpio. */
+.tabla-quincena td:has(+ .hoy) { border-right: none !important; }
+.tabla-quincena thead th.dia.hoy { border: 2px solid var(--ok); }
+.tabla-quincena thead th:has(+ .dia.hoy) { border-right: none; }
 
 /* Cabecera semanas: la primera celda del encabezado abarca columnas de día */
 .tabla-quincena thead tr.primer-fila th {
@@ -428,6 +486,31 @@ h1, h2, h3, p { margin: 0; }
 }
 .popover .pop-item:hover { background: var(--superficie-2); }
 .popover .pop-item .muestra { width: 26px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 10.5px; font-weight: 800; flex: none; }
+.popover .pop-item.activo { background: var(--superficie-2); outline: 1.5px solid var(--acento-borde); }
+.popover .pop-etiqueta {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--apagado);
+  padding: 6px 10px 2px;
+}
+.popover .pop-comentario {
+  display: block;
+  width: calc(100% - 12px);
+  margin: 2px 6px 4px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+  min-height: 42px;
+  color: var(--tinta);
+}
+.popover .pop-comentario:focus { outline: none; border-color: var(--acento); box-shadow: 0 0 0 3px var(--acento-suave); }
+.popover-editor { min-width: 248px; }
+.popover .pop-guardar { font-weight: 600; }
 .popover .pop-sep { height: 1px; background: var(--borde-suave); margin: 4px 6px; }
 
 /* ------------------------------------------------------- Calendario mensual */
@@ -507,7 +590,7 @@ h1, h2, h3, p { margin: 0; }
 .etiqueta-tipo { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
 .etiqueta-tipo .punto { width: 7px; height: 7px; }
 
-/* tabla empleadas */
+/* tabla empleados */
 .tabla-personas { width: 100%; border-collapse: collapse; }
 .tabla-personas th {
   text-align: left;

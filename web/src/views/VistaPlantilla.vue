@@ -24,13 +24,52 @@ type ClaveOrden = "empleada" | "telefono" | "contrato" | "antiguedad" | "tiempo"
 /** Orden activo de la tabla: columna y dirección (1 = ascendente, -1 = descendente). */
 const orden = ref<{ clave: ClaveOrden; dir: 1 | -1 }>({ clave: "empleada", dir: 1 });
 
+// --------------------------------------------------------- filtro por estado
+// Por defecto se muestran solo los empleados activos (sin fecha de baja).
+type FiltroEstado = "activos" | "noactivos" | "todos";
+const filtroEstado = ref<FiltroEstado>("activos");
+const OPCIONES_FILTRO: { id: FiltroEstado; etiqueta: string }[] = [
+  { id: "activos", etiqueta: "Activos" },
+  { id: "noactivos", etiqueta: "No activos" },
+  { id: "todos", etiqueta: "Todos" }
+];
+
+const totales = computed(() => {
+  const todos = empleadosOrdenados();
+  const activos = todos.filter((e) => !e.baja).length;
+  return { total: todos.length, activos };
+});
+
+function conteoFiltro(id: FiltroEstado): number {
+  if (id === "activos") return totales.value.activos;
+  if (id === "noactivos") return totales.value.total - totales.value.activos;
+  return totales.value.total;
+}
+
+const mensajeVacio = computed(() => {
+  if (!totales.value.total) {
+    return { titulo: "Aún no hay empleados registrados.", sub: "Pulsa «Añadir empleado» para crear el primero." };
+  }
+  if (filtroEstado.value === "activos") {
+    return { titulo: "No hay empleados activos.", sub: "Cambia el filtro a «No activos» o «Todos» para verlos." };
+  }
+  if (filtroEstado.value === "noactivos") {
+    return { titulo: "No hay empleados de baja.", sub: "Cambia el filtro a «Todos» para ver la plantilla completa." };
+  }
+  return { titulo: "", sub: "" };
+});
+
 const empleados = computed(() => {
-  const lista = empleadosOrdenados(); // copia ya ordenada por apellidos
+  // Copia ya ordenada por apellidos, filtrada por estado (activos por defecto).
+  const lista = empleadosOrdenados().filter((e) =>
+    filtroEstado.value === "activos" ? !e.baja :
+    filtroEstado.value === "noactivos" ? !!e.baja :
+    true);
   const { clave, dir } = orden.value;
   const saldos = clave === "tiempo" ? saldoTiemposPorEmpleado() : null;
   const usadas = clave === "vacaciones" ? new Map(lista.map((e) => [e.id, vacacionesUsadasAnio(e.id)])) : null;
   lista.sort((a, b) => {
-    // Las empleadas de baja quedan siempre al final del listado.
+    // Los empleados de baja quedan siempre al final del listado.
     if (a.baja !== b.baja) return a.baja ? 1 : -1;
     let cmp = 0;
     switch (clave) {
@@ -170,7 +209,7 @@ function usadas(e: Empleado): number {
   return vacacionesUsadasAnio(e.id);
 }
 
-/** Días de vacaciones que corresponden a la empleada en el año actual (proporcional si el alta es este año). */
+/** Días de vacaciones que corresponden a un empleado en el año actual (proporcional si el alta es este año). */
 function diasDisponibles(e: Empleado): number {
   return vacacionesDisponiblesAnio(e, anioActual);
 }
@@ -197,12 +236,12 @@ const vacacionesAnioModal = computed(() =>
 
 const saldosTiempo = computed(() => saldoTiemposPorEmpleado());
 
-/** Saldo de tiempo recuperable (minutos con signo) de una empleada. */
+/** Saldo de tiempo recuperable (minutos con signo) de un empleado. */
 function saldoDe(e: Empleado): number {
   return saldosTiempo.value.get(e.id) ?? 0;
 }
 
-/** Antigüedad de una empleada: desde el alta hasta hoy (o hasta su baja). */
+/** Antigüedad de un empleado: desde el alta hasta hoy (o hasta su baja). */
 function antiguedadDe(e: Empleado): string {
   if (!e.alta) return "—";
   return transcurridoTexto(e.alta, e.baja ?? hoy());
@@ -243,10 +282,27 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
     <header class="cabecera-pagina">
       <div>
         <h1>Plantilla</h1>
-        <p class="sub">{{ empleados.length }} empleada{{ empleados.length === 1 ? "" : "s" }} · clic en una fila para abrir su historial de acciones · ✎ para editar la ficha</p>
+        <p class="sub">
+          {{ totales.total }} empleado{{ totales.total === 1 ? "" : "s" }} · {{ totales.activos }} activo{{ totales.activos === 1 ? "" : "s" }}
+          · clic en una fila para abrir su historial de acciones · ✎ para editar la ficha
+        </p>
       </div>
       <div class="acciones-pagina">
-        <button class="btn primario" @click="abrirNueva"><Icono nombre="mas" /> Añadir empleada</button>
+        <div class="filtro-estado" role="group" aria-label="Filtrar por estado">
+          <button
+            v-for="f in OPCIONES_FILTRO"
+            :key="f.id"
+            type="button"
+            class="chip-filtro"
+            :class="{ activo: filtroEstado === f.id }"
+            :aria-pressed="filtroEstado === f.id"
+            @click="filtroEstado = f.id"
+          >
+            {{ f.etiqueta }}
+            <span class="chip-num">{{ conteoFiltro(f.id) }}</span>
+          </button>
+        </div>
+        <button class="btn primario" @click="abrirNueva"><Icono nombre="mas" /> Añadir empleado</button>
       </div>
     </header>
 
@@ -254,8 +310,8 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
       <table class="tabla-personas" v-if="empleados.length">
         <thead>
           <tr>
-            <th class="th-ordenable" title="Ordenar por empleada" :aria-sort="ariaOrden('empleada')" @click="alternarOrden('empleada')">
-              Empleada<span class="flecha" v-if="flechaOrden('empleada')">{{ flechaOrden('empleada') }}</span>
+            <th class="th-ordenable" title="Ordenar por empleado" :aria-sort="ariaOrden('empleada')" @click="alternarOrden('empleada')">
+              Empleados<span class="flecha" v-if="flechaOrden('empleada')">{{ flechaOrden('empleada') }}</span>
             </th>
             <th class="th-ordenable" title="Ordenar por teléfono" :aria-sort="ariaOrden('telefono')" @click="alternarOrden('telefono')">
               Teléfono<span class="flecha" v-if="flechaOrden('telefono')">{{ flechaOrden('telefono') }}</span>
@@ -298,7 +354,7 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
                   <div style="font-weight: 600">{{ nombreCompleto(e) }}</div>
                   <div style="font-size: 11.5px; color: var(--apagado)">
                     {{ e.dni ? `DNI ${e.dni}` : "Sin DNI" }} ·
-                    {{ e.baja ? `baja ${fmt(e.baja)}` : "activa" }}
+                    {{ e.baja ? `baja ${fmt(e.baja)}` : "activo" }}
                     <span v-if="e.baja && e.motivoBaja" :title="e.motivoBaja">✎</span>
                   </div>
                 </div>
@@ -340,12 +396,13 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
         </tbody>
       </table>
       <div v-else class="vacio-mensaje">
-        Aún no hay empleadas registradas.<br />
-        Pulsa «Añadir empleada» para crear la primera.
+        <template v-if="mensajeVacio.titulo">{{ mensajeVacio.titulo }}</template>
+        <template v-else>Nadie coincide con el filtro.</template>
+        <br />{{ mensajeVacio.sub }}
       </div>
     </section>
 
-    <Modal v-if="abierto" :titulo="editando ? 'Editar empleada' : 'Nueva empleada'" :ancho="680" @cerrar="abierto = false">
+    <Modal v-if="abierto" :titulo="editando ? 'Editar empleado' : 'Nuevo empleado'" :ancho="680" @cerrar="abierto = false">
       <div class="fila-form">
         <p class="grupo-titulo">Datos personales</p>
 
@@ -442,7 +499,7 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
         <template v-if="editando">
           <p class="grupo-titulo">Baja laboral</p>
           <div class="campo">
-            <label>Fecha de baja (vacío = sigue activa)</label>
+            <label>Fecha de baja (vacío = sigue activo)</label>
             <CampoFecha v-model="borrador.baja" :max="hoy()" />
           </div>
           <div class="campo" v-if="borrador.baja">
@@ -474,7 +531,7 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
       </div>
     </Modal>
 
-    <!-- Historial de acciones de la empleada (más reciente primero) -->
+    <!-- Historial de acciones del empleado (más reciente primero) -->
     <Modal
       v-if="historialAbierto && historialEmp"
       :titulo="`Historial de acciones · ${nombreCompleto(historialEmp)}`"
@@ -487,7 +544,20 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             {{ etiquetaTipoHistorial(h.tipo).slice(0, 1) }}
           </span>
           <span class="hist-cuerpo">
-            <span class="hist-texto">{{ h.texto }}</span>
+            <!-- Cambios de ficha: se muestran campo a campo con el valor anterior tachado. -->
+            <span v-if="h.cambios && h.cambios.length" class="hist-cambios">
+              <span v-if="h.cambios.some((c) => !c.nota)" class="hist-cabecera">Perfil actualizado</span>
+              <span v-for="c in h.cambios" :key="c.campo + (c.nota ?? '')" class="hist-cambio">
+                <template v-if="c.nota">{{ c.nota }}</template>
+                <template v-else>
+                  <span class="hist-campo">{{ c.campo }}</span>
+                  <s class="hist-antes" :title="`Antes: ${c.antes}`">{{ c.antes }}</s>
+                  <span class="hist-flecha">→</span>
+                  <b class="hist-despues">{{ c.despues }}</b>
+                </template>
+              </span>
+            </span>
+            <span v-else class="hist-texto">{{ h.texto }}</span>
             <span class="hist-fecha">{{ fmtFechaHora(h.cuando) }}</span>
           </span>
         </div>
@@ -554,6 +624,43 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
   color: var(--apagado);
 }
 
+.hist-cambios {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.hist-cabecera {
+  font-weight: 700;
+  color: var(--tinta);
+}
+.hist-cambio {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 7px;
+  color: var(--tinta);
+}
+.hist-campo {
+  color: var(--subtitulo);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hist-campo::after {
+  content: ":";
+}
+.hist-antes {
+  color: var(--apagado);
+  text-decoration-thickness: 1.5px;
+}
+.hist-flecha {
+  color: var(--apagado);
+}
+.hist-despues {
+  color: var(--tinta);
+}
+
 .th-ordenable {
   cursor: pointer;
   user-select: none;
@@ -566,5 +673,50 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
   margin-left: 4px;
   font-size: 11px;
   color: var(--acento);
+}
+
+/* ------------------------------------------------------- filtro por estado */
+.filtro-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--superficie-2);
+  border: 1px solid var(--borde);
+  border-radius: 11px;
+  padding: 3px;
+}
+.chip-filtro {
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 5px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--subtitulo);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+.chip-filtro:hover { color: var(--tinta); background: var(--superficie); }
+.chip-filtro.activo {
+  background: var(--superficie);
+  color: var(--acento);
+  box-shadow: var(--sombra-suave);
+}
+.chip-num {
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--borde-suave);
+  color: var(--subtitulo);
+  border-radius: 999px;
+  padding: 1px 6px;
+  min-width: 16px;
+  text-align: center;
+}
+.chip-filtro.activo .chip-num {
+  background: var(--acento);
+  color: #fff;
 }
 </style>
