@@ -1,0 +1,81 @@
+name: Compilar instalador Windows
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configurar Rust (stable, MSVC)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri
+
+      - name: Garantizar WebView2 Runtime
+        shell: pwsh
+        run: |
+          $instalador = "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
+          try {
+            Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $instalador
+            Start-Process -FilePath $instalador -ArgumentList "/silent /install" -Wait
+          } catch {
+            Write-Host "No se pudo instalar WebView2 (se ignora: puede que ya este presente)."
+          }
+
+      - name: Instalar dependencias npm
+        run: npm install
+
+      - name: Compilar el instalador .exe (NSIS)
+        run: npm run tauri:build -- --bundles nsis
+
+      - name: Subir el instalador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          path: web/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+      - name: Publicar release automatico en cada push a main
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Elimina el release y la etiqueta anteriores (si existen) y crea uno nuevo
+          # apuntando a la ultima commit de main, con el instalador adjunto.
+          gh release delete latest-main --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest-main \
+            src-tauri/target/release/bundle/nsis/*-setup.exe \
+            --target main \
+            --title "Ultima compilacion (main)" \
+            --notes "Instalador de Windows generado automaticamente en cada push a main. Commit: ${{ github.sha }}"
+
+      - name: Crear release en etiquetas v*
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: web/src-tauri/target/release/bundle/nsis/*-setup.exe
+          generate_release_notes: true
