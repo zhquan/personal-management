@@ -55,18 +55,59 @@ const abiertoTiempos = ref(false);
 
 /** Filtros de la barra superior: aplican al calendario, al detalle y a las listas. */
 type FiltroTipo = "todos" | TipoRegistro;
-const filtroBorrador = reactive({ empleadoId: 0, tipo: "todos" as FiltroTipo });
-const filtro = reactive({ empleadoId: 0, tipo: "todos" as FiltroTipo });
+type FiltroEstado = "activos" | "noactivos" | "todos";
+const OPCIONES_ESTADO: { id: FiltroEstado; etiqueta: string }[] = [
+  { id: "activos", etiqueta: "Activos" },
+  { id: "noactivos", etiqueta: "No activos" },
+  { id: "todos", etiqueta: "Todos" }
+];
+const filtroBorrador = reactive({
+  empleadoId: 0,
+  tipo: "todos" as FiltroTipo,
+  estado: "activos" as FiltroEstado
+});
+const filtro = reactive({
+  empleadoId: 0,
+  tipo: "todos" as FiltroTipo,
+  estado: "activos" as FiltroEstado
+});
 const hayFiltro = computed(() => filtro.empleadoId !== 0 || filtro.tipo !== "todos");
 
+/** ¿El empleado sigue trabajando hoy? (sin baja o con la baja todavía futura). */
+function estaActivo(e: Empleado): boolean {
+  return !e.baja || e.baja > hoy();
+}
+
+/** ¿Pertenece el empleado (o un registro suyo) al grupo de estado indicado? */
+function empleadoEnEstado(e: Empleado | undefined, estado: FiltroEstado): boolean {
+  if (!e) return true;
+  if (estado === "activos") return estaActivo(e);
+  if (estado === "noactivos") return !estaActivo(e);
+  return true;
+}
+
 function aplicarFiltros() {
+  // Si se eligió un empleado que no encaja en el estado seleccionado, se limpia.
+  if (filtroBorrador.empleadoId !== 0) {
+    const e = empleados.value.find((x) => x.id === filtroBorrador.empleadoId);
+    if (!empleadoEnEstado(e, filtroBorrador.estado)) filtroBorrador.empleadoId = 0;
+  }
   filtro.empleadoId = filtroBorrador.empleadoId;
   filtro.tipo = filtroBorrador.tipo;
+  filtro.estado = filtroBorrador.estado;
 }
 function quitarFiltros() {
   filtroBorrador.empleadoId = 0;
   filtroBorrador.tipo = "todos";
+  filtroBorrador.estado = "activos";
   aplicarFiltros();
+}
+/** Al cambiar el estado, un empleado ya elegido que no encaje se descarta. */
+function alCambiarEstado() {
+  if (filtroBorrador.empleadoId !== 0) {
+    const e = empleados.value.find((x) => x.id === filtroBorrador.empleadoId);
+    if (!empleadoEnEstado(e, filtroBorrador.estado)) filtroBorrador.empleadoId = 0;
+  }
 }
 function cumpleFiltroEmpleado(empleadoId: number): boolean {
   return filtro.empleadoId === 0 || empleadoId === filtro.empleadoId;
@@ -74,17 +115,23 @@ function cumpleFiltroEmpleado(empleadoId: number): boolean {
 function cumpleFiltroTipo(tipo: TipoAusencia | "recuperable"): boolean {
   return filtro.tipo === "todos" || tipo === filtro.tipo;
 }
+/** Los registros de un empleado solo se muestran si este encaja en el estado aplicado. */
+function cumpleFiltroEstado(empleadoId: number): boolean {
+  return empleadoEnEstado(empleadoDe(empleadoId), filtro.estado);
+}
 
 const empleados = computed(() => empleadosOrdenados());
 
 /**
- * Empleados que se ofrecen para elegir (filtro y formulario): los que siguen
- * trabajando, es decir, sin fecha de baja o con la baja todavía en el futuro
- * (siguen en activo hasta su último día, igual que en el Calendario).
- * Los historiales y el calendario del mes siguen mostrando a todos.
+ * Empleados que siguen trabajando hoy (sin baja o con baja futura): los que se
+ * ofrecen en el selector del formulario, ya que no se registran ausencias
+ * nuevas a quien causó baja, y los que entran en el filtro «Activos».
  */
-const empleadosActivos = computed(() =>
-  empleados.value.filter((e) => !e.baja || e.baja > hoy())
+const empleadosActivos = computed(() => empleados.value.filter((e) => estaActivo(e)));
+
+/** Empleados que se ofrecen en el desplegable del filtro según el estado elegido. */
+const empleadosSegunEstadoBorrador = computed(() =>
+  empleados.value.filter((e) => empleadoEnEstado(e, filtroBorrador.estado))
 );
 
 const cabecera = computed(() => `${nombreMesCapitalizado(mes.value)} ${anio.value}`);
@@ -157,8 +204,12 @@ const detalleDia = computed(() => {
   const f = seleccionada.value;
   return {
     fecha: f,
-    aus: ausenciasEnDia(f).filter((a) => cumpleFiltroEmpleado(a.empleadoId) && cumpleFiltroTipo(a.tipo)),
-    tiempos: tiemposEnDia(f).filter((t) => cumpleFiltroEmpleado(t.empleadoId) && cumpleFiltroTipo("recuperable"))
+    aus: ausenciasEnDia(f).filter(
+      (a) => cumpleFiltroEmpleado(a.empleadoId) && cumpleFiltroTipo(a.tipo) && cumpleFiltroEstado(a.empleadoId)
+    ),
+    tiempos: tiemposEnDia(f).filter(
+      (t) => cumpleFiltroEmpleado(t.empleadoId) && cumpleFiltroTipo("recuperable") && cumpleFiltroEstado(t.empleadoId)
+    )
   };
 });
 
@@ -302,7 +353,8 @@ const ausenciasMes = computed(() => {
         compare(a.fin, ini) >= 0 &&
         compare(a.inicio, fin) <= 0 &&
         cumpleFiltroEmpleado(a.empleadoId) &&
-        cumpleFiltroTipo(a.tipo)
+        cumpleFiltroTipo(a.tipo) &&
+        cumpleFiltroEstado(e.id)
       ) {
         lista.push({ aus: a, emp: e });
       }
@@ -313,8 +365,12 @@ const ausenciasMes = computed(() => {
 
 // Tiempo recuperable registrado este mes (respeta el filtro activo)
 const tiemposMes = computed(() =>
-  tiemposDelMes(anio.value, mes.value)
-    .filter((t) => cumpleFiltroEmpleado(t.empleadoId) && cumpleFiltroTipo("recuperable"))
+  tiemposDelMes(anio.value, mes.value).filter(
+    (t) =>
+      cumpleFiltroEmpleado(t.empleadoId) &&
+      cumpleFiltroTipo("recuperable") &&
+      cumpleFiltroEstado(t.empleadoId)
+  )
     .map((t) => ({ t, emp: empleadoDe(t.empleadoId) }))
     .sort((x, y) => compare(x.t.fecha, y.t.fecha) || (x.emp?.apellidos ?? "").localeCompare(y.emp?.apellidos ?? "", "es"))
 );
@@ -421,7 +477,7 @@ function claseSaldo(min: number): string {
               <label for="filtro-empleada">Empleado</label>
               <select id="filtro-empleada" v-model="filtroBorrador.empleadoId">
                 <option :value="0">Todos</option>
-                <option v-for="e in empleadosActivos" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
+                <option v-for="e in empleadosSegunEstadoBorrador" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
               </select>
             </div>
             <div class="filtro-campo">
@@ -429,6 +485,12 @@ function claseSaldo(min: number): string {
               <select id="filtro-tipo" v-model="filtroBorrador.tipo">
                 <option value="todos">Todos los tipos</option>
                 <option v-for="t in OPCIONES_TIPO" :key="t.id" :value="t.id">{{ t.nombre }}</option>
+              </select>
+            </div>
+            <div class="filtro-campo">
+              <label for="filtro-estado">Estado</label>
+              <select id="filtro-estado" v-model="filtroBorrador.estado" @change="alCambiarEstado">
+                <option v-for="op in OPCIONES_ESTADO" :key="op.id" :value="op.id">{{ op.etiqueta }}</option>
               </select>
             </div>
             <button class="btn primario" @click="aplicarFiltros">Aplicar</button>
