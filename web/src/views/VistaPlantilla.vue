@@ -19,7 +19,7 @@ import type { Empleado, HistorialItem } from "../lib/types";
 import { fmt, fmtFechaHora, hoy, transcurridoTexto } from "../lib/dates";
 import { formatearTiempo, descripcionSaldo } from "../lib/tiempo";
 
-type ClaveOrden = "empleada" | "telefono" | "contrato" | "antiguedad" | "tiempo" | "vacaciones";
+type ClaveOrden = "empleada" | "telefono" | "contrato" | "antiguedad" | "alta" | "tiempo" | "vacaciones";
 
 /** Orden activo de la tabla: columna y dirección (1 = ascendente, -1 = descendente). */
 const orden = ref<{ clave: ClaveOrden; dir: 1 | -1 }>({ clave: "empleada", dir: 1 });
@@ -69,8 +69,9 @@ const empleados = computed(() => {
   const saldos = clave === "tiempo" ? saldoTiemposPorEmpleado() : null;
   const usadas = clave === "vacaciones" ? new Map(lista.map((e) => [e.id, vacacionesUsadasAnio(e.id)])) : null;
   lista.sort((a, b) => {
-    // Los empleados de baja quedan siempre al final del listado.
-    if (a.baja !== b.baja) return a.baja ? 1 : -1;
+    // Los empleados de baja quedan siempre al final del listado (se compara la
+    // presencia de baja, no la fecha, para que el resto de columnas sí ordene).
+    if (!!a.baja !== !!b.baja) return a.baja ? 1 : -1;
     let cmp = 0;
     switch (clave) {
       case "empleada":
@@ -83,6 +84,7 @@ const empleados = computed(() => {
         cmp = (a.tipoContrato || "").localeCompare(b.tipoContrato || "", "es");
         break;
       case "antiguedad":
+      case "alta":
         cmp = a.alta.localeCompare(b.alta) || a.id - b.id; // ascendente = más antigua primero
         break;
       case "tiempo":
@@ -322,6 +324,9 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             <th class="th-ordenable" title="Ordenar por antigüedad (más antigua primero)" :aria-sort="ariaOrden('antiguedad')" @click="alternarOrden('antiguedad')">
               Antigüedad<span class="flecha" v-if="flechaOrden('antiguedad')">{{ flechaOrden('antiguedad') }}</span>
             </th>
+            <th class="th-ordenable" title="Ordenar por fecha de alta (más antigua primero)" :aria-sort="ariaOrden('alta')" @click="alternarOrden('alta')">
+              Fecha alta<span class="flecha" v-if="flechaOrden('alta')">{{ flechaOrden('alta') }}</span>
+            </th>
             <th
               class="th-ordenable"
               title="Ordenar por tiempo recuperable. − = horas extra realizadas · + = debe horas"
@@ -367,8 +372,11 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
                 {{ e.jornadaHoras ? `${e.jornadaHoras} h/semana` : "jornada sin fijar" }}
               </div>
             </td>
-            <td style="white-space: nowrap" :title="`Alta: ${fmt(e.alta)}`">
+            <td style="white-space: nowrap">
               <span style="font-size: 13px">{{ antiguedadDe(e) }}</span>
+            </td>
+            <td style="white-space: nowrap" :title="`Alta el ${fmt(e.alta)}`">
+              <span style="font-size: 13px">{{ fmt(e.alta) }}</span>
             </td>
             <td style="white-space: nowrap">
               <span
