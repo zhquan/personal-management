@@ -77,6 +77,16 @@ function cumpleFiltroTipo(tipo: TipoAusencia | "recuperable"): boolean {
 
 const empleados = computed(() => empleadosOrdenados());
 
+/**
+ * Empleados que se ofrecen para elegir (filtro y formulario): los que siguen
+ * trabajando, es decir, sin fecha de baja o con la baja todavía en el futuro
+ * (siguen en activo hasta su último día, igual que en el Calendario).
+ * Los historiales y el calendario del mes siguen mostrando a todos.
+ */
+const empleadosActivos = computed(() =>
+  empleados.value.filter((e) => !e.baja || e.baja > hoy())
+);
+
 const cabecera = computed(() => `${nombreMesCapitalizado(mes.value)} ${anio.value}`);
 
 function anterior() {
@@ -165,6 +175,20 @@ const borrador = reactive({
   comentario: ""
 });
 const errorForm = ref("");
+
+/**
+ * Opciones del selector de empleado del formulario: los activos y, si se está
+ * editando un registro de alguien ya inactivo, también esa persona para que el
+ * valor actual siga visible y se pueda corregir.
+ */
+function opcionesEmpleado(): Empleado[] {
+  const activos = empleadosActivos.value;
+  const seleccionado = borrador.empleadoId
+    ? empleados.value.find((e) => e.id === borrador.empleadoId)
+    : undefined;
+  if (seleccionado && !activos.includes(seleccionado)) return [...activos, seleccionado];
+  return activos;
+}
 
 function abrirNueva() {
   editar.value = null;
@@ -397,7 +421,7 @@ function claseSaldo(min: number): string {
               <label for="filtro-empleada">Empleado</label>
               <select id="filtro-empleada" v-model="filtroBorrador.empleadoId">
                 <option :value="0">Todos</option>
-                <option v-for="e in empleados" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
+                <option v-for="e in empleadosActivos" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
               </select>
             </div>
             <div class="filtro-campo">
@@ -611,7 +635,7 @@ function claseSaldo(min: number): string {
           <label>Empleado</label>
           <select v-model.number="borrador.empleadoId">
             <option :value="0" disabled>Selecciona el empleado…</option>
-            <option v-for="e in empleados" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
+            <option v-for="e in opcionesEmpleado()" :key="e.id" :value="e.id">{{ nombreCompleto(e) }}</option>
           </select>
         </div>
         <div class="campo">
