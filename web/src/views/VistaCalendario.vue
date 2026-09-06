@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import Icono from "../components/Icono.vue";
 import {
+  diaEnSemanaLaboral,
   editarDia,
   empleadosOrdenados,
   esDiaCerrado,
@@ -25,6 +26,12 @@ import type { Asignacion, Ausencia, Empleado, Fecha, Origen, PlanAvanzado, TipoT
 
 const inicio = ref<Fecha>(inicioQuincena(hoy()));
 const dias = computed(() => diasQuincena(inicio.value));
+/** Solo los días que caen dentro de la semana laboral configurada (p. ej.
+ *  miércoles a lunes: el martes no aparece). La quincena se alinea al día de
+ *  inicio, así que ambas semanas tienen los mismos días visibles. */
+const diasVisibles = computed(() => dias.value.filter((f) => diaEnSemanaLaboral(f)));
+const visiblesSemana1 = computed(() => dias.value.slice(0, 7).filter((f) => diaEnSemanaLaboral(f)));
+const visiblesSemana2 = computed(() => dias.value.slice(7, 14).filter((f) => diaEnSemanaLaboral(f)));
 const empleados = computed(() => empleadosOrdenados());
 
 // ------------------------------------------- filtro por estado (como Plantilla)
@@ -180,7 +187,7 @@ interface FilaPlan {
  */
 const filasPlan = computed<FilaPlan[]>(() => {
   const bf = bloquesPorFecha.value;
-  const diasArr = dias.value;
+  const diasArr = diasVisibles.value;
   // Empleados de cada día con todos sus tramos, en orden estable (por la hora
   // del primer tramo y luego por id) para que los carriles no cambien de sitio.
   const empleadosDelDia = diasArr.map((f) => {
@@ -414,6 +421,7 @@ function tituloCelda(nombre: string, fecha: Fecha, estado: EstadoCelda): string 
 
 const filas = computed<Fila[]>(() => {
   const diasArr = dias.value;
+  const visibles = diasVisibles.value;
   const ini = diasArr[0];
   const finExcl = addDays(ini, diasArr.length);
   const ultimo = diasArr[diasArr.length - 1];
@@ -451,7 +459,7 @@ const filas = computed<Fila[]>(() => {
 
   return empleadosFiltrados.value.map((e) => {
     const nombre = nombreCompleto(e);
-    const celdas: Celda[] = diasArr.map((f) => {
+    const celdas: Celda[] = visibles.map((f) => {
       let estado: EstadoCelda;
       let estilo: Record<string, string> | undefined;
       if (cerrados.has(f)) {
@@ -605,7 +613,7 @@ async function exportarPdf() {
       return { turno: null, clase: "vacio" };
     })
   }));
-  const avisos = huecos.value.map((h) => {
+  const avisos = huecos.value.filter((h) => diaEnSemanaLaboral(h.fecha)).map((h) => {
     const nombre = h.turno === "M" ? "mañana" : h.turno === "T" ? "tarde" : infoTurno(h.turno).nombre;
     return `${fmt(h.fecha)} · turno de ${nombre} sin cubrir`;
   });
@@ -614,6 +622,8 @@ async function exportarPdf() {
     inicio: inicio.value,
     filas: filasPdf,
     avisos,
+    dias: diasVisibles.value,
+    diasSemana1: visiblesSemana1.value.length,
     turnos: state.tiposTurno.map((t) => ({ sigla: t.sigla, nombre: t.nombre, color: t.color }))
   });
 }
@@ -732,7 +742,7 @@ function turnoPorDefecto(): Turno | null {
             <tr>
               <th class="col-hora" scope="col">Horas</th>
               <th
-                v-for="f in dias"
+                v-for="f in diasVisibles"
                 :key="f"
                 class="col-dia"
                 scope="col"
@@ -784,12 +794,12 @@ function turnoPorDefecto(): Turno | null {
         <thead>
           <tr class="primer-fila">
             <th class="nombre-col" :style="{ width: anchoColEmpleados + 'px' }"></th>
-            <th class="sep-semana" :colspan="7">Semana {{ semanaISO(dias[0]) }}</th>
-            <th class="sep-semana" :colspan="7">Semana {{ semanaISO(dias[7]) }}</th>
+            <th class="sep-semana" :colspan="visiblesSemana1.length">Semana {{ semanaISO(dias[0]) }}</th>
+            <th class="sep-semana" :colspan="visiblesSemana2.length">Semana {{ semanaISO(dias[7]) }}</th>
           </tr>
           <tr>
             <th class="nombre-col" style="text-align: left; padding: 7px 10px">Empleados</th>
-            <th v-for="f in dias" :key="f" class="dia" :class="{ domingo: esDomingo(f), cerrado: esDiaCerrado(f), hoy: f === hoy(), 'inicio-semana': f === dias[7] }">
+            <th v-for="f in diasVisibles" :key="f" class="dia" :class="{ domingo: esDomingo(f), cerrado: esDiaCerrado(f), hoy: f === hoy(), 'inicio-semana': f === dias[7] }">
               <div style="font-size: 10px; text-transform: uppercase">
                 {{ nombreDiaCorto(f) }}<span v-if="esDiaCerrado(f)" style="color: var(--peligro)" title="Empresa cerrada"> ✕</span>
               </div>

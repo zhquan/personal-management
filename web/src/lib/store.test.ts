@@ -29,6 +29,9 @@ import {
   restaurarTurnosBase,
   setDiasCierre,
   setDiasCierreCuentanVacaciones,
+  setFinSemanaLaboral,
+  setInicioSemanaLaboral,
+  diaEnSemanaLaboral,
   contarDiasVacaciones,
   setDuracionFranjaVistaAvanzada,
   setRangoVistaAvanzada,
@@ -397,6 +400,42 @@ describe("ajustes: cierre de la empresa", () => {
     // Limpia para no afectar a otros tests.
     eliminarAusencia(state.ausencias.find((a) => a.empleadoId === 99)!.id);
     setDiasCierreCuentanVacaciones(true);
+  });
+
+  it("define qué días forman la semana laboral del Calendario de turnos", () => {
+    // Por defecto: lunes (1) a domingo (7) → todos los días cuentan.
+    expect(state.inicioSemanaLaboral).toBe(1);
+    expect(state.finSemanaLaboral).toBe(7);
+    expect(diaEnSemanaLaboral("2026-09-07")).toBe(true); // lunes
+    expect(diaEnSemanaLaboral("2026-09-08")).toBe(true); // martes
+    expect(diaEnSemanaLaboral("2026-09-13")).toBe(true); // domingo
+
+    // Semana de miércoles (3) a lunes (1): el martes (2) queda fuera.
+    setInicioSemanaLaboral(3);
+    setFinSemanaLaboral(1);
+    expect(diaEnSemanaLaboral("2026-09-09")).toBe(true); // miércoles
+    expect(diaEnSemanaLaboral("2026-09-13")).toBe(true); // domingo
+    expect(diaEnSemanaLaboral("2026-09-07")).toBe(true); // lunes
+    expect(diaEnSemanaLaboral("2026-09-08")).toBe(false); // martes fuera de la semana
+    expect(diaEnSemanaLaboral("2026-09-15")).toBe(false); // martes de la semana siguiente
+
+    // El ajuste viaja en exportar/importar; un archivo antiguo usa los valores por defecto.
+    const datos = exportarDatos();
+    expect(datos.inicioSemanaLaboral).toBe(3);
+    expect(datos.finSemanaLaboral).toBe(1);
+    setInicioSemanaLaboral(1);
+    setFinSemanaLaboral(7);
+    importarDatos(datos);
+    expect(state.inicioSemanaLaboral).toBe(3);
+    expect(state.finSemanaLaboral).toBe(1);
+    const { inicioSemanaLaboral: _a, finSemanaLaboral: _b, ...antiguo } = datos;
+    importarDatos(antiguo);
+    expect(state.inicioSemanaLaboral).toBe(1);
+    expect(state.finSemanaLaboral).toBe(7);
+
+    // Restaura el estado por defecto para no afectar a otros tests.
+    setInicioSemanaLaboral(1);
+    setFinSemanaLaboral(7);
   });
 });
 

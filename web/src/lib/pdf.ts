@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
-import { addDays, fmt, inicioSemana, nombreDiaCorto, semanaISO } from "./dates";
-import type { Origen } from "./types";
+import { addDays, fmt, nombreDiaCorto, semanaISO } from "./dates";
+import type { Fecha, Origen } from "./types";
 
 export interface CeldaPdf {
   /** Sigla del turno: "M", "T" o un turno personalizado. */
@@ -21,8 +21,12 @@ export interface FilaPdf {
 }
 
 export interface PdfCalendario {
-  inicio: string; // lunes de la quincena
+  inicio: string; // día de inicio de la quincena (alineado a la semana laboral)
   filas: FilaPdf[];
+  /** Días visibles de la quincena (por defecto los 14 naturales). */
+  dias?: Fecha[];
+  /** Cuántos días visibles pertenecen a la primera semana (por defecto 7). */
+  diasSemana1?: number;
   titulo?: string;
   empresa?: string;
   avisos?: string[];
@@ -71,9 +75,13 @@ export function construirPdfCalendario(datos: PdfCalendario): jsPDF {
 
   // ---- Cabecera -----------------------------------------------------------
   const ini = datos.inicio;
-  const fin = addDays(ini, 13);
+  // Días visibles: los de la semana laboral configurada; por defecto, los 14.
+  const diasArr = datos.dias ?? Array.from({ length: 14 }, (_, i) => addDays(ini, i));
+  const nDias = diasArr.length;
+  const nSem1 = datos.diasSemana1 ?? 7;
+  const fin = diasArr[nDias - 1];
   const semana1 = semanaISO(ini);
-  const semana2 = semanaISO(inicioSemana(fin));
+  const semana2 = semanaISO(addDays(ini, 7));
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(15);
@@ -92,7 +100,7 @@ export function construirPdfCalendario(datos: PdfCalendario): jsPDF {
   const y0 = 27;
   const colNombre = 52;
   const resto = ancho - MARGEN * 2 - colNombre;
-  const colDia = resto / 14;
+  const colDia = resto / nDias;
   const cuerpoAlto = datos.filas.length * filaAlto;
 
   // Reduce la altura de fila si hubiera muchísimos empleados para que entre en una página.
@@ -134,8 +142,7 @@ export function construirPdfCalendario(datos: PdfCalendario): jsPDF {
   doc.text("Empleados", x + 2.5, y + cabAlto1 / 2 + 0.3, { baseline: "middle" });
   x += colNombre;
 
-  for (const sem of [semana1, semana2]) {
-    const wBloque = colDia * 7;
+  for (const [sem, wBloque] of [[semana1, colDia * nSem1], [semana2, colDia * (nDias - nSem1)]] as const) {
     doc.setFillColor(238, 240, 255);
     doc.setDrawColor(227, 231, 240);
     doc.setLineWidth(0.2);
@@ -149,8 +156,8 @@ export function construirPdfCalendario(datos: PdfCalendario): jsPDF {
   // ---- Fila 2: días ---------------------------------------------------------
   y += cabAlto1;
   x = x0 + colNombre;
-  for (let i = 0; i < 14; i++) {
-    const fecha = addDays(ini, i);
+  for (let i = 0; i < nDias; i++) {
+    const fecha = diasArr[i];
     const domingo = nombreDiaCorto(fecha) === "domingo";
     doc.setFillColor(domingo ? 253 : 248, domingo ? 244 : 249, domingo ? 247 : 253);
     doc.setDrawColor(227, 231, 240);
@@ -240,7 +247,7 @@ export function construirPdfCalendario(datos: PdfCalendario): jsPDF {
   // Línea vertical gruesa entre el día 7 y el día 8, de arriba abajo de la
   // tabla (cabecera de semanas + fila de días + cuerpo), para que la semana 1
   // y la semana 2 se distingan de un vistazo.
-  const xSep = x0 + colNombre + colDia * 7;
+  const xSep = x0 + colNombre + colDia * nSem1;
   doc.setDrawColor(79, 70, 229);
   doc.setLineWidth(0.9);
   doc.line(xSep, y0, xSep, y);

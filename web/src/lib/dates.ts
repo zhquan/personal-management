@@ -79,22 +79,30 @@ export function daysInMonth(year: number, month: number): number {
 }
 
 // ---------------------------------------------------------------- Quincenas
-// Cada quincena son 14 días naturales alineados con semanas ISO (lunes a domingo).
-// El lunes de referencia es 06/01/2020.
+// Cada quincena son 14 días naturales alineados con el día de inicio de la
+// semana laboral configurado (por defecto lunes). El lunes de referencia es
+// 06/01/2020; si la semana empieza otro día, la quincena se alinea a ese día
+// para que sus dos semanas sean completas.
 
 const EPOCH_LUNES = dayNumber("2020-01-06");
 export const DIAS_QUINCENA = 14;
 
-export function indiceQuincena(iso: Fecha): number {
-  return Math.floor((dayNumber(iso) - EPOCH_LUNES) / DIAS_QUINCENA);
+/** Día de la semana en ISO (1 = lunes … 7 = domingo) para una fecha. */
+export function diaSemanaISO(iso: Fecha): number {
+  const dow = new Date(Date.UTC(parse(iso).y, parse(iso).m - 1, parse(iso).d)).getUTCDay();
+  return ((dow + 6) % 7) + 1;
 }
 
-export function inicioDeIndice(idx: number): Fecha {
-  return addDays("2020-01-06", idx * DIAS_QUINCENA);
+export function indiceQuincena(iso: Fecha, diaInicio = 1): number {
+  return Math.floor((dayNumber(iso) - (EPOCH_LUNES + (diaInicio - 1))) / DIAS_QUINCENA);
 }
 
-export function inicioQuincena(iso: Fecha): Fecha {
-  return inicioDeIndice(indiceQuincena(iso));
+export function inicioDeIndice(idx: number, diaInicio = 1): Fecha {
+  return addDays("2020-01-06", idx * DIAS_QUINCENA + (diaInicio - 1));
+}
+
+export function inicioQuincena(iso: Fecha, diaInicio = 1): Fecha {
+  return inicioDeIndice(indiceQuincena(iso, diaInicio), diaInicio);
 }
 
 /** Lunes de la semana ISO que contiene la fecha. */

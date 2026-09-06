@@ -1,7 +1,7 @@
 import { reactive } from "vue";
 import type { Asignacion, Ausencia, Empleado, Fecha, HistorialCambio, HistorialItem, Hueco, Origen, PeriodoCierre, PlanAvanzado, TiempoRecuperable, TipoTurno, Turno } from "./types";
 import { plantillaEmpleado, TIPOS_TURNO_BASE, tipoNombre } from "./types";
-import { addDays, compare, diasQuincena, fmt, hoy, inicioQuincena, indiceQuincena } from "./dates";
+import { addDays, compare, diasQuincena, diaSemanaISO, fmt, hoy, inicioDeIndice, inicioQuincena as inicioQuincenaBase, indiceQuincena } from "./dates";
 import { formatearTiempo } from "./tiempo";
 import { planificar } from "./scheduler";
 import { generarFranjas, minutosAFormato, minutosDe, normalizarHora, MINUTOS_FRANJA } from "./horario";
@@ -9,7 +9,7 @@ import type { Franja } from "./horario";
 
 // ------------------------------------------------------------------ Estado
 const CLAVE = "gestor-personal-v2";
-const VERSION_DATOS = 8; // v8: los días de cierre semanal cuentan o no como días de vacaciones
+const VERSION_DATOS = 9; // v9: inicio y fin configurables de la semana laboral del Calendario de turnos
 
 /** Rango horario por defecto de la vista Avanzada (franjas de 30 min). */
 const RANGO_VISTA_POR_DEFECTO = { desde: "06:00", hasta: "22:00" } as const;
@@ -29,6 +29,10 @@ interface AppData {
   diasCierre: number[];
   /** ¿Los días de cierre semanal cuentan como días de vacaciones? (Sí = naturales, No = laborables). */
   diasCierreCuentanVacaciones: boolean;
+  /** Día (1 = lunes … 7 = domingo) en que empieza la semana laboral del Calendario de turnos. */
+  inicioSemanaLaboral: number;
+  /** Día (1 = lunes … 7 = domingo) en que termina la semana laboral del Calendario de turnos. */
+  finSemanaLaboral: number;
   /** Períodos de cierre (p. ej. vacaciones de la empresa): rangos de fechas. */
   periodosCierre: PeriodoCierre[];
   /** Tipos de turno (Mañana/Tarde incluidos; si se borran, dejan de programarse). */
@@ -55,6 +59,8 @@ const vacio = (): AppData => ({
   historial: [],
   diasCierre: [],
   diasCierreCuentanVacaciones: true,
+  inicioSemanaLaboral: 1,
+  finSemanaLaboral: 7,
   periodosCierre: [],
   tiposTurno: [...TIPOS_TURNO_BASE],
   desdeVistaAvanzada: RANGO_VISTA_POR_DEFECTO.desde,
@@ -88,6 +94,11 @@ function normalizarPlanAvanzado(lista: unknown): PlanAvanzado[] {
   return out;
 }
 
+/** ¿Es un día de la semana válido (1 = lunes … 7 = domingo)? */
+function esDiaSemana(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 7;
+}
+
 /** Devuelve la lista de tipos garantizando que Mañana y Tarde estén al principio. */
 function conTurnosBase(lista: TipoTurno[]): TipoTurno[] {
   const personalizados = lista.filter((t) => t.id > 0);
@@ -110,6 +121,9 @@ function cargar(): AppData {
       : [];
     // Los días de cierre semanal cuentan como vacaciones salvo que se desactive.
     d.diasCierreCuentanVacaciones = d.diasCierreCuentanVacaciones !== false;
+    // Inicio y fin de la semana laboral (v9): por defecto lunes a domingo.
+    d.inicioSemanaLaboral = esDiaSemana(d.inicioSemanaLaboral) ? d.inicioSemanaLaboral : 1;
+    d.finSemanaLaboral = esDiaSemana(d.finSemanaLaboral) ? d.finSemanaLaboral : 7;
     d.periodosCierre = Array.isArray(d.periodosCierre)
       ? (d.periodosCierre as PeriodoCierre[]).filter(
           (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
@@ -620,6 +634,8 @@ export function exportarDatos(): AppData {
       historial: state.historial,
       diasCierre: state.diasCierre,
       diasCierreCuentanVacaciones: state.diasCierreCuentanVacaciones,
+      inicioSemanaLaboral: state.inicioSemanaLaboral,
+      finSemanaLaboral: state.finSemanaLaboral,
       periodosCierre: state.periodosCierre,
       tiposTurno: state.tiposTurno,
       desdeVistaAvanzada: state.desdeVistaAvanzada,
@@ -667,6 +683,8 @@ export function importarDatos(raw: unknown): ResultadoImport {
     ? (d.diasCierre as unknown[]).filter((x): x is number => typeof x === "number" && x >= 1 && x <= 7)
     : [];
   state.diasCierreCuentanVacaciones = d.diasCierreCuentanVacaciones !== false;
+  state.inicioSemanaLaboral = esDiaSemana(d.inicioSemanaLaboral) ? d.inicioSemanaLaboral : 1;
+  state.finSemanaLaboral = esDiaSemana(d.finSemanaLaboral) ? d.finSemanaLaboral : 7;
   state.periodosCierre = Array.isArray(d.periodosCierre)
     ? (d.periodosCierre as PeriodoCierre[]).filter(
         (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
@@ -724,6 +742,37 @@ export function setDiasCierre(dias: number[]) {
 export function setDiasCierreCuentanVacaciones(cuentan: boolean) {
   state.diasCierreCuentanVacaciones = cuentan;
   guardar();
+}
+
+/** Día (1 = lunes … 7 = domingo) en que empieza la semana laboral del Calendario de turnos. */
+export function setInicioSemanaLaboral(dia: number) {
+  if (!esDiaSemana(dia)) return;
+  state.inicioSemanaLaboral = dia;
+  guardar();
+  regenerarAlrededor();
+}
+
+/** Día (1 = lunes … 7 = domingo) en que termina la semana laboral del Calendario de turnos. */
+export function setFinSemanaLaboral(dia: number) {
+  if (!esDiaSemana(dia)) return;
+  state.finSemanaLaboral = dia;
+  guardar();
+  regenerarAlrededor();
+}
+
+/**
+ * ¿Cae el día dentro de la semana laboral configurada (de inicioSemanaLaboral
+ * a finSemanaLaboral, en orden cíclico)? Por defecto lunes (1) a domingo (7):
+ * todos los días. Si la semana va de miércoles (3) a lunes (1), el martes (2)
+ * queda fuera y no se muestra en el Calendario de turnos.
+ */
+export function diaEnSemanaLaboral(fecha: Fecha): boolean {
+  const d = diaSemanaISO(fecha);
+  const ini = state.inicioSemanaLaboral;
+  const fin = state.finSemanaLaboral;
+  if (ini <= fin) return d >= ini && d <= fin;
+  // Cruza el domingo: p. ej. miércoles (3) a lunes (1) incluye 3,4,5,6,7,1.
+  return d >= ini || d <= fin;
 }
 
 /**
@@ -1229,13 +1278,9 @@ export function quitarPlanAvanzado(fecha: Fecha, empleadoId: number) {
   guardar();
 }
 
-/** Índice de la quincena siguiente/anterior para navegación. */
+/** Índice de la quincena siguiente/anterior para navegación (alineada al inicio de semana). */
 export function quincenaVecina(inicio: Fecha, delta: number): Fecha {
-  return inicioDeQuincenaPorIndice(indiceQuincena(inicio) + delta);
-}
-
-function inicioDeQuincenaPorIndice(idx: number): Fecha {
-  return addDays("2020-01-06", idx * 14);
+  return inicioDeIndice(indiceQuincena(inicio, state.inicioSemanaLaboral) + delta, state.inicioSemanaLaboral);
 }
 
 /** Regenera la quincena actual y la anterior (tras cambios de plantilla/ausencias). */
@@ -1248,4 +1293,7 @@ export function regenerarAlrededor(): Hueco[] {
   return huecos;
 }
 
-export { inicioQuincena };
+/** Inicio de la quincena visible, alineado al día de inicio de la semana laboral. */
+export function inicioQuincena(iso: Fecha): Fecha {
+  return inicioQuincenaBase(iso, state.inicioSemanaLaboral);
+}

@@ -3,6 +3,7 @@ import {
   addDays,
   compare,
   diasQuincena,
+  diaSemanaISO,
   fmt,
   indiceQuincena,
   inicioDeIndice,
@@ -110,6 +111,24 @@ describe("quincenas alineadas con semanas ISO", () => {
     expect(inicioSemana("2026-09-07")).toBe("2026-09-07"); // lunes
     expect(inicioSemana("2026-09-13")).toBe("2026-09-07"); // domingo
     expect(inicioSemana("2026-09-16")).toBe("2026-09-14"); // miércoles
+  });
+
+  it("diaSemanaISO devuelve 1 = lunes … 7 = domingo", () => {
+    expect(diaSemanaISO("2026-09-07")).toBe(1); // lunes
+    expect(diaSemanaISO("2026-09-08")).toBe(2); // martes
+    expect(diaSemanaISO("2026-09-13")).toBe(7); // domingo
+  });
+
+  it("las quincenas se alinean al día de inicio de la semana laboral", () => {
+    // Con la semana empezando el miércoles (3), 2026-09-09 (miércoles) es inicio
+    // de quincena y la quincena va de miércoles a martes (7 días × 2).
+    expect(inicioQuincena("2026-09-11", 3)).toBe("2026-09-09");
+    expect(inicioQuincena("2026-09-15", 3)).toBe("2026-09-09"); // martes de la misma quincena
+    expect(inicioQuincena("2026-09-16", 3)).toBe("2026-09-09"); // miércoles de la misma quincena
+    expect(inicioQuincena("2026-09-23", 3)).toBe("2026-09-23"); // miércoles siguiente
+    expect(indiceQuincena("2026-09-09", 3)).toBe(indiceQuincena("2026-09-15", 3));
+    // Por defecto (lunes) el comportamiento no cambia.
+    expect(inicioQuincena("2026-09-11")).toBe("2026-09-07");
   });
 });
 

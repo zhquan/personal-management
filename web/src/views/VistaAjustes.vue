@@ -12,6 +12,8 @@ import {
   restaurarTurnosBase,
   setDiasCierre,
   setDiasCierreCuentanVacaciones,
+  setFinSemanaLaboral,
+  setInicioSemanaLaboral,
   setDuracionFranjaVistaAvanzada,
   setRangoVistaAvanzada,
   setVistaAvanzadaActivada,
@@ -274,6 +276,36 @@ const avisoHoyCerrado = computed(() => {
           <p class="nota resumen-cierre" style="margin-top: 8px">
             Con «Sí», un período del lunes al domingo con cierre el martes cuenta
             <b>7 días naturales</b>; con «No», <b>6 días laborables</b> (el martes no cuenta).
+          </p>
+        </div>
+
+        <div class="sep-forma"></div>
+        <div class="rango-semana">
+          <span class="etiqueta-opcion">Inicio y fin de semana (Calendario de turnos)</span>
+          <div class="grid-2">
+            <div class="campo">
+              <label>La semana empieza el</label>
+              <select
+                :value="state.inicioSemanaLaboral"
+                @change="setInicioSemanaLaboral(Number(($event.target as HTMLSelectElement).value))"
+              >
+                <option v-for="d in DIAS_SEMANA" :key="d.n" :value="d.n">{{ d.nombre[0].toUpperCase() + d.nombre.slice(1) }}</option>
+              </select>
+            </div>
+            <div class="campo">
+              <label>y termina el</label>
+              <select
+                :value="state.finSemanaLaboral"
+                @change="setFinSemanaLaboral(Number(($event.target as HTMLSelectElement).value))"
+              >
+                <option v-for="d in DIAS_SEMANA" :key="d.n" :value="d.n">{{ d.nombre[0].toUpperCase() + d.nombre.slice(1) }}</option>
+              </select>
+            </div>
+          </div>
+          <p class="nota resumen-cierre" style="margin-top: 8px">
+            El Calendario de turnos muestra cada semana desde el día de inicio hasta el de fin.
+            Si, por ejemplo, el <b>martes</b> es día de cierre semanal, pon la semana de
+            <b>miércoles a lunes</b>: el martes no aparecerá en el calendario.
           </p>
         </div>
       </section>
@@ -595,6 +627,19 @@ const avisoHoyCerrado = computed(() => {
 .chip-si-no.activo {
   background: var(--acento);
   color: #fff;
+}
+
+/* ------------------------------------------- inicio y fin de la semana laboral */
+.rango-semana {
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--borde-suave);
+  border-radius: 10px;
+  background: var(--superficie);
+}
+.rango-semana select {
+  width: 100%;
+  min-width: 0;
 }
 
 /* -------------------------------------------------------- períodos de cierre */
