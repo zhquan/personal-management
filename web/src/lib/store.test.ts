@@ -28,12 +28,15 @@ import {
   restaurarCopia,
   restaurarTurnosBase,
   setDiasCierre,
+  setDiasCierreCuentanVacaciones,
+  contarDiasVacaciones,
   setDuracionFranjaVistaAvanzada,
   setRangoVistaAvanzada,
   setVistaAvanzadaActivada,
   state,
   turnosAutomaticos,
-  vacacionesDisponiblesAnio
+  vacacionesDisponiblesAnio,
+  vacacionesUsadasAnio
 } from "./store";
 
 describe("guardarAusencia", () => {
@@ -339,6 +342,61 @@ describe("ajustes: cierre de la empresa", () => {
     expect(esDiaCerrado("2026-08-25")).toBe(true);
     expect(esDiaCerrado("2026-08-26")).toBe(false);
     expect(esDiaCerrado("2026-08-02")).toBe(false);
+  });
+
+  it("cuenta los días de vacaciones: naturales o laborables según el cierre semanal", () => {
+    // 2026-09-07 es lunes … 2026-09-13 es domingo (7 días). Con cierre el martes (ISO 2):
+    // el martes 2026-09-08 no cuenta → 6 días laborables.
+    setDiasCierre([2]);
+    expect(contarDiasVacaciones("2026-09-07", "2026-09-13")).toEqual({ naturales: 7, laborables: 6 });
+    // Un único día que es cierre semanal: 0 laborables.
+    expect(contarDiasVacaciones("2026-09-08", "2026-09-08")).toEqual({ naturales: 1, laborables: 0 });
+    // Sin cierres semanales, todos los días cuentan.
+    setDiasCierre([]);
+    expect(contarDiasVacaciones("2026-09-07", "2026-09-13")).toEqual({ naturales: 7, laborables: 7 });
+    // Rango invertido o vacío: 0.
+    expect(contarDiasVacaciones("2026-09-13", "2026-09-07")).toEqual({ naturales: 0, laborables: 0 });
+  });
+
+  it("el ajuste «cuentan como vacaciones» es persistente y viaja en exportar/importar", () => {
+    expect(state.diasCierreCuentanVacaciones).toBe(true);
+    setDiasCierreCuentanVacaciones(false);
+    expect(state.diasCierreCuentanVacaciones).toBe(false);
+    const datos = exportarDatos();
+    expect(datos.diasCierreCuentanVacaciones).toBe(false);
+    setDiasCierreCuentanVacaciones(true);
+    importarDatos(datos);
+    expect(state.diasCierreCuentanVacaciones).toBe(false);
+    // Un archivo antiguo (sin el campo) deja el ajuste activado por defecto.
+    const { diasCierreCuentanVacaciones: _omitida, ...antiguo } = datos;
+    setDiasCierreCuentanVacaciones(false);
+    importarDatos(antiguo);
+    expect(state.diasCierreCuentanVacaciones).toBe(true);
+  });
+
+  it("vacacionesUsadasAnio descuenta los días de cierre semanal si no cuentan", () => {
+    // Empleado 99 de vacaciones del lunes 07/09 al domingo 13/09 (7 días naturales).
+    // Con cierre semanal el martes (ISO 2) y «no cuentan como vacaciones»:
+    // se gastan 6 días laborables; con «sí cuentan» serían 7.
+    guardarAusencia({
+      id: 0,
+      empleadoId: 99,
+      inicio: "2026-09-07",
+      fin: "2026-09-13",
+      tipo: "vacaciones"
+    });
+    setDiasCierre([2]);
+    setDiasCierreCuentanVacaciones(false);
+    expect(vacacionesUsadasAnio(99, 2026)).toBe(6);
+    setDiasCierreCuentanVacaciones(true);
+    expect(vacacionesUsadasAnio(99, 2026)).toBe(7);
+    // Sin cierres semanales, todos los días cuentan con el ajuste en «No».
+    setDiasCierre([]);
+    setDiasCierreCuentanVacaciones(false);
+    expect(vacacionesUsadasAnio(99, 2026)).toBe(7);
+    // Limpia para no afectar a otros tests.
+    eliminarAusencia(state.ausencias.find((a) => a.empleadoId === 99)!.id);
+    setDiasCierreCuentanVacaciones(true);
   });
 });
 

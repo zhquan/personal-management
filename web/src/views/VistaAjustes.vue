@@ -11,6 +11,7 @@ import {
   quitarTipoTurno,
   restaurarTurnosBase,
   setDiasCierre,
+  setDiasCierreCuentanVacaciones,
   setDuracionFranjaVistaAvanzada,
   setRangoVistaAvanzada,
   setVistaAvanzadaActivada,
@@ -251,6 +252,30 @@ const avisoHoyCerrado = computed(() => {
           Cierre semanal: <b>{{ textoDiasCierre }}</b>
           <template v-if="state.diasCierre.length"> · los días cerrados quedan sin turnos</template>.
         </p>
+
+        <div class="opcion-vacaciones">
+          <span class="etiqueta-opcion">¿Los días de cierre semanal cuentan como vacaciones?</span>
+          <div class="grupo-si-no">
+            <button
+              type="button"
+              class="chip-si-no"
+              :class="{ activo: state.diasCierreCuentanVacaciones }"
+              :title="'Cada día del período cuenta como vacaciones (días naturales)'"
+              @click="setDiasCierreCuentanVacaciones(true)"
+            >Sí</button>
+            <button
+              type="button"
+              class="chip-si-no"
+              :class="{ activo: !state.diasCierreCuentanVacaciones }"
+              :title="'Los días de cierre semanal no cuentan como vacaciones (días laborables)'"
+              @click="setDiasCierreCuentanVacaciones(false)"
+            >No</button>
+          </div>
+          <p class="nota resumen-cierre" style="margin-top: 8px">
+            Con «Sí», un período del lunes al domingo con cierre el martes cuenta
+            <b>7 días naturales</b>; con «No», <b>6 días laborables</b> (el martes no cuenta).
+          </p>
+        </div>
       </section>
 
       <!-- Períodos de cierre -->
@@ -534,6 +559,43 @@ const avisoHoyCerrado = computed(() => {
 .chip-corto { font-size: 13px; line-height: 1; }
 .chip-nombre { font-size: 9.5px; font-weight: 500; text-transform: uppercase; opacity: 0.75; }
 .resumen-cierre { color: var(--subtitulo); font-weight: 500; }
+
+/* ------------------------------------------- los días de cierre cuentan como vacaciones */
+.opcion-vacaciones {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--borde-suave);
+  border-radius: 10px;
+  background: var(--superficie);
+}
+.etiqueta-opcion {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.grupo-si-no {
+  display: inline-flex;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.chip-si-no {
+  border: none;
+  background: var(--superficie);
+  color: var(--subtitulo);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 18px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chip-si-no + .chip-si-no { border-left: 1px solid var(--borde); }
+.chip-si-no.activo {
+  background: var(--acento);
+  color: #fff;
+}
 
 /* -------------------------------------------------------- períodos de cierre */
 .lista-periodos {

@@ -9,7 +9,7 @@ import type { Franja } from "./horario";
 
 // ------------------------------------------------------------------ Estado
 const CLAVE = "gestor-personal-v2";
-const VERSION_DATOS = 7; // v7: capa de planificación por horas de la vista Avanzada del calendario
+const VERSION_DATOS = 8; // v8: los días de cierre semanal cuentan o no como días de vacaciones
 
 /** Rango horario por defecto de la vista Avanzada (franjas de 30 min). */
 const RANGO_VISTA_POR_DEFECTO = { desde: "06:00", hasta: "22:00" } as const;
@@ -27,6 +27,8 @@ interface AppData {
   historial: HistorialItem[];
   /** Días de la semana en que la empresa cierra (1 = lunes … 7 = domingo). */
   diasCierre: number[];
+  /** ¿Los días de cierre semanal cuentan como días de vacaciones? (Sí = naturales, No = laborables). */
+  diasCierreCuentanVacaciones: boolean;
   /** Períodos de cierre (p. ej. vacaciones de la empresa): rangos de fechas. */
   periodosCierre: PeriodoCierre[];
   /** Tipos de turno (Mañana/Tarde incluidos; si se borran, dejan de programarse). */
@@ -52,6 +54,7 @@ const vacio = (): AppData => ({
   descansos: [],
   historial: [],
   diasCierre: [],
+  diasCierreCuentanVacaciones: true,
   periodosCierre: [],
   tiposTurno: [...TIPOS_TURNO_BASE],
   desdeVistaAvanzada: RANGO_VISTA_POR_DEFECTO.desde,
@@ -105,6 +108,8 @@ function cargar(): AppData {
     d.diasCierre = Array.isArray(d.diasCierre)
       ? (d.diasCierre as unknown[]).filter((x): x is number => typeof x === "number" && x >= 1 && x <= 7)
       : [];
+    // Los días de cierre semanal cuentan como vacaciones salvo que se desactive.
+    d.diasCierreCuentanVacaciones = d.diasCierreCuentanVacaciones !== false;
     d.periodosCierre = Array.isArray(d.periodosCierre)
       ? (d.periodosCierre as PeriodoCierre[]).filter(
           (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
@@ -552,7 +557,12 @@ export function vacacionesUsadasAnio(empleadoId: number, anio = Number(hoy().sli
     if (a.empleadoId !== empleadoId || a.tipo !== "vacaciones") continue;
     const iniD = compare(a.inicio, iniAnio) < 0 ? iniAnio : a.inicio;
     const finD = compare(a.fin, finAnio) > 0 ? finAnio : a.fin;
-    if (compare(iniD, finD) <= 0) usado += diasEntre(iniD, finD);
+    if (compare(iniD, finD) <= 0) {
+      // Si los días de cierre semanal NO cuentan como vacaciones, se descuentan
+      // del cómputo (días laborables); si cuentan, se cuentan todos (naturales).
+      const { naturales, laborables } = contarDiasVacaciones(iniD, finD);
+      usado += state.diasCierreCuentanVacaciones ? naturales : laborables;
+    }
   }
   return usado;
 }
@@ -609,6 +619,7 @@ export function exportarDatos(): AppData {
       descansos: state.descansos,
       historial: state.historial,
       diasCierre: state.diasCierre,
+      diasCierreCuentanVacaciones: state.diasCierreCuentanVacaciones,
       periodosCierre: state.periodosCierre,
       tiposTurno: state.tiposTurno,
       desdeVistaAvanzada: state.desdeVistaAvanzada,
@@ -655,6 +666,7 @@ export function importarDatos(raw: unknown): ResultadoImport {
   state.diasCierre = Array.isArray(d.diasCierre)
     ? (d.diasCierre as unknown[]).filter((x): x is number => typeof x === "number" && x >= 1 && x <= 7)
     : [];
+  state.diasCierreCuentanVacaciones = d.diasCierreCuentanVacaciones !== false;
   state.periodosCierre = Array.isArray(d.periodosCierre)
     ? (d.periodosCierre as PeriodoCierre[]).filter(
         (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
@@ -706,6 +718,30 @@ export function setDiasCierre(dias: number[]) {
   state.diasCierre = [...new Set(dias.filter((d) => d >= 1 && d <= 7))].sort((a, b) => a - b);
   guardar();
   regenerarAlrededor();
+}
+
+/** ¿Los días de cierre semanal cuentan como días de vacaciones? (Sí = naturales, No = laborables). */
+export function setDiasCierreCuentanVacaciones(cuentan: boolean) {
+  state.diasCierreCuentanVacaciones = cuentan;
+  guardar();
+}
+
+/**
+ * Cuenta los días de vacaciones entre dos fechas (ambas incluidas):
+ * naturales (todos) y laborables (excluye los días de cierre semanal).
+ */
+export function contarDiasVacaciones(inicio: Fecha, fin: Fecha): { naturales: number; laborables: number } {
+  if (!inicio || !fin || compare(inicio, fin) > 0) return { naturales: 0, laborables: 0 };
+  let naturales = 0;
+  let laborables = 0;
+  for (let d = inicio; compare(d, fin) <= 0; d = addDays(d, 1)) {
+    naturales++;
+    // Día de la semana en ISO (1 = lunes … 7 = domingo).
+    const fecha = new Date(Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10))));
+    const iso = ((fecha.getUTCDay() + 6) % 7) + 1;
+    if (!state.diasCierre.includes(iso)) laborables++;
+  }
+  return { naturales, laborables };
 }
 
 /** Añade un período de cierre (empresa cerrada entre esas fechas, ambas incluidas). */

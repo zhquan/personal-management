@@ -13,7 +13,9 @@ import {
   eliminarTiempo,
   guardarTiempo,
   tiemposDelMes,
-  tiemposEnDia
+  tiemposEnDia,
+  contarDiasVacaciones,
+  state
 } from "../lib/store";
 import {
   addDays,
@@ -455,6 +457,24 @@ function estiloTipo(t: TipoAusencia): { fondo: string; tinta: string } {
 function claseSaldo(min: number): string {
   return min < 0 ? "etiqueta ok" : min > 0 ? "etiqueta roja" : "etiqueta neutra";
 }
+
+/**
+ * Resumen de días que cuenta una ausencia de vacaciones según el ajuste
+ * «¿Los días de cierre semanal cuentan como vacaciones?»: naturales (Sí) o
+ * laborables excluyendo los días de cierre semanal (No). Solo para «vacaciones».
+ */
+const resumenVacaciones = computed(() => {
+  if (borrador.tipo !== "vacaciones") return "";
+  if (!borrador.inicio || !borrador.fin) return "";
+  if (compare(borrador.inicio, borrador.fin) > 0) return "";
+  const { naturales, laborables } = contarDiasVacaciones(borrador.inicio, borrador.fin);
+  if (state.diasCierreCuentanVacaciones) {
+    return `Se contarán ${naturales} día${naturales === 1 ? "" : "s"} naturales de vacaciones.`;
+  }
+  const cerrados = naturales - laborables;
+  const nota = cerrados > 0 ? ` (${cerrados} día${cerrados === 1 ? "" : "s"} de cierre semanal no cuentan)` : "";
+  return `Se contarán ${laborables} día${laborables === 1 ? "" : "s"} laborables de vacaciones${nota}.`;
+});
 </script>
 
 <template>
@@ -743,6 +763,9 @@ function claseSaldo(min: number): string {
               <CampoFecha v-model="borrador.fin" />
             </div>
           </div>
+          <p v-if="resumenVacaciones" class="ayuda resumen-vacaciones" style="margin: -2px 0 0">
+            {{ resumenVacaciones }}
+          </p>
         </template>
 
         <div class="campo">
@@ -889,5 +912,10 @@ function claseSaldo(min: number): string {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 180px;
+}
+
+.resumen-vacaciones {
+  font-weight: 600;
+  color: var(--acento);
 }
 </style>
