@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef, type Component } from "vue";
 import Icono from "./components/Icono.vue";
+import VistaDashboard from "./views/VistaDashboard.vue";
 import VistaPlantilla from "./views/VistaPlantilla.vue";
 import VistaCalendario from "./views/VistaCalendario.vue";
 import VistaAusencias from "./views/VistaAusencias.vue";
 import VistaMantenimiento from "./views/VistaMantenimiento.vue";
 import VistaAjustes from "./views/VistaAjustes.vue";
 
-type Seccion = "plantilla" | "calendario" | "ausencias" | "mantenimiento" | "ajustes";
+type Seccion = "dashboard" | "plantilla" | "calendario" | "ausencias" | "mantenimiento" | "ajustes";
 
 const secciones: { id: Seccion; etiqueta: string; icono: string }[] = [
+  { id: "dashboard", etiqueta: "Dashboard", icono: "grafica" },
   { id: "plantilla", etiqueta: "Plantilla", icono: "personas" },
   { id: "calendario", etiqueta: "Calendario de turnos", icono: "calendario" },
   { id: "ausencias", etiqueta: "Vacaciones y ausencias", icono: "sol" },
@@ -18,6 +20,7 @@ const secciones: { id: Seccion; etiqueta: string; icono: string }[] = [
 ];
 
 const componente: Record<Seccion, Component> = {
+  dashboard: VistaDashboard,
   plantilla: VistaPlantilla,
   calendario: VistaCalendario,
   ausencias: VistaAusencias,
