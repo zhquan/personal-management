@@ -601,6 +601,11 @@ h1, h2, h3, p { margin: 0; }
   padding: 10px 14px;
   border-bottom: 1px solid var(--borde);
   font-weight: 700;
+  /* Cabecera fija cuando la tabla se desplaza verticalmente dentro de su tarjeta */
+  position: sticky;
+  top: 0;
+  background: var(--superficie);
+  z-index: 2;
 }
 .tabla-personas td { padding: 9px 14px; border-bottom: 1px solid var(--borde-suave); vertical-align: middle; }
 .tabla-personas tr:last-child td { border-bottom: none; }

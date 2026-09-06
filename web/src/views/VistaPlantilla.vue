@@ -19,10 +19,27 @@ import type { Empleado, HistorialItem } from "../lib/types";
 import { fmt, fmtFechaHora, hoy, transcurridoTexto } from "../lib/dates";
 import { formatearTiempo, descripcionSaldo } from "../lib/tiempo";
 
-type ClaveOrden = "empleada" | "telefono" | "contrato" | "antiguedad" | "alta" | "tiempo" | "vacaciones";
+type ClaveOrden =
+  | "empleada"
+  | "telefono"
+  | "contrato"
+  | "antiguedad"
+  | "alta"
+  | "motivoBaja"
+  | "tiempo"
+  | "vacaciones";
 
 /** Orden activo de la tabla: columna y dirección (1 = ascendente, -1 = descendente). */
 const orden = ref<{ clave: ClaveOrden; dir: 1 | -1 }>({ clave: "empleada", dir: 1 });
+
+// --------------------------------------------------------------- buscador
+// Un único cuadro que busca a la vez por nombre, apellidos, DNI, teléfono y
+// motivo de baja. Se combina (Y) con el filtro de estado.
+const busqueda = ref("");
+
+function textoBuscable(e: Empleado): string {
+  return `${e.nombre} ${e.apellidos} ${e.dni} ${e.telefono} ${e.motivoBaja}`.toLowerCase();
+}
 
 // --------------------------------------------------------- filtro por estado
 // Por defecto se muestran solo los empleados activos (sin fecha de baja).
@@ -60,11 +77,16 @@ const mensajeVacio = computed(() => {
 });
 
 const empleados = computed(() => {
-  // Copia ya ordenada por apellidos, filtrada por estado (activos por defecto).
-  const lista = empleadosOrdenados().filter((e) =>
-    filtroEstado.value === "activos" ? !e.baja :
-    filtroEstado.value === "noactivos" ? !!e.baja :
-    true);
+  // Copia ya ordenada por apellidos, filtrada por estado (activos por defecto)
+  // y por el texto del buscador (nombre, apellidos, DNI, teléfono, motivo de baja).
+  const q = busqueda.value.trim().toLowerCase();
+  const lista = empleadosOrdenados().filter((e) => {
+    const porEstado =
+      filtroEstado.value === "activos" ? !e.baja :
+      filtroEstado.value === "noactivos" ? !!e.baja :
+      true;
+    return porEstado && (!q || textoBuscable(e).includes(q));
+  });
   const { clave, dir } = orden.value;
   const saldos = clave === "tiempo" ? saldoTiemposPorEmpleado() : null;
   const usadas = clave === "vacaciones" ? new Map(lista.map((e) => [e.id, vacacionesUsadasAnio(e.id)])) : null;
@@ -86,6 +108,9 @@ const empleados = computed(() => {
       case "antiguedad":
       case "alta":
         cmp = a.alta.localeCompare(b.alta) || a.id - b.id; // ascendente = más antigua primero
+        break;
+      case "motivoBaja":
+        cmp = (a.motivoBaja || "").localeCompare(b.motivoBaja || "", "es") || a.id - b.id;
         break;
       case "tiempo":
         cmp = (saldos?.get(a.id) ?? 0) - (saldos?.get(b.id) ?? 0);
@@ -290,6 +315,18 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
         </p>
       </div>
       <div class="acciones-pagina">
+        <div class="buscador">
+          <Icono nombre="lupa" :tam="15" />
+          <input
+            v-model="busqueda"
+            type="search"
+            placeholder="Buscar por nombre, DNI, teléfono, motivo de baja…"
+            aria-label="Buscar empleados"
+          />
+          <button v-if="busqueda" class="buscador-limpiar" title="Limpiar búsqueda" @click="busqueda = ''">
+            <Icono nombre="cerrar" :tam="12" />
+          </button>
+        </div>
         <div class="filtro-estado" role="group" aria-label="Filtrar por estado">
           <button
             v-for="f in OPCIONES_FILTRO"
@@ -308,7 +345,7 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
       </div>
     </header>
 
-    <section class="tarjeta" style="overflow: auto">
+    <section class="tarjeta tabla-wrap">
       <table class="tabla-personas" v-if="empleados.length">
         <thead>
           <tr>
@@ -326,6 +363,9 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             </th>
             <th class="th-ordenable" title="Ordenar por fecha de alta (más antigua primero)" :aria-sort="ariaOrden('alta')" @click="alternarOrden('alta')">
               Fecha alta<span class="flecha" v-if="flechaOrden('alta')">{{ flechaOrden('alta') }}</span>
+            </th>
+            <th class="th-ordenable" title="Ordenar por motivo de baja" :aria-sort="ariaOrden('motivoBaja')" @click="alternarOrden('motivoBaja')">
+              Motivo de baja<span class="flecha" v-if="flechaOrden('motivoBaja')">{{ flechaOrden('motivoBaja') }}</span>
             </th>
             <th
               class="th-ordenable"
@@ -378,6 +418,14 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             <td style="white-space: nowrap" :title="`Alta el ${fmt(e.alta)}`">
               <span style="font-size: 13px">{{ fmt(e.alta) }}</span>
             </td>
+            <td>
+              <span
+                v-if="e.baja && e.motivoBaja"
+                class="motivo-baja"
+                :title="e.motivoBaja"
+              >{{ e.motivoBaja }}</span>
+              <span v-else style="color: var(--apagado)">—</span>
+            </td>
             <td style="white-space: nowrap">
               <span
                 class="etiqueta"
@@ -404,9 +452,14 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
         </tbody>
       </table>
       <div v-else class="vacio-mensaje">
-        <template v-if="mensajeVacio.titulo">{{ mensajeVacio.titulo }}</template>
-        <template v-else>Nadie coincide con el filtro.</template>
-        <br />{{ mensajeVacio.sub }}
+        <template v-if="busqueda.trim()">
+          Nadie coincide con «{{ busqueda.trim() }}».<br />Revisa el texto o cambia el filtro de estado.
+        </template>
+        <template v-else>
+          <template v-if="mensajeVacio.titulo">{{ mensajeVacio.titulo }}</template>
+          <template v-else>Nadie coincide con el filtro.</template>
+          <br />{{ mensajeVacio.sub }}
+        </template>
       </div>
     </section>
 
@@ -582,6 +635,72 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
 </template>
 
 <style scoped>
+/* Scroll vertical de la tabla cuando supera la altura de la ventana */
+.tabla-wrap {
+  max-height: calc(100vh - 245px);
+  min-height: 240px;
+  overflow-y: auto;
+}
+
+/* Buscador único (nombre, apellidos, DNI, teléfono, motivo de baja) */
+.buscador {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.buscador svg {
+  position: absolute;
+  left: 10px;
+  color: var(--apagado);
+  pointer-events: none;
+}
+.buscador input {
+  border: 1px solid var(--borde);
+  border-radius: 9px;
+  padding: 8px 30px 8px 33px;
+  font-size: 13px;
+  font-family: inherit;
+  min-width: 250px;
+  outline: none;
+  background: var(--superficie);
+  color: var(--tinta);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.buscador input:focus {
+  border-color: var(--acento);
+  box-shadow: 0 0 0 3px var(--acento-suave);
+}
+.buscador input::-webkit-search-cancel-button { display: none; }
+.buscador-limpiar {
+  position: absolute;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--superficie-2);
+  color: var(--apagado);
+  cursor: pointer;
+}
+.buscador-limpiar:hover {
+  background: var(--borde-suave);
+  color: var(--tinta);
+}
+
+/* Motivo de baja: hasta dos líneas con el texto completo al pasar el ratón */
+.motivo-baja {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--subtitulo);
+  max-width: 230px;
+}
+
 .historial-lista {
   display: flex;
   flex-direction: column;

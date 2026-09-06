@@ -6,6 +6,7 @@ const ICONOS: Record<string, string> = {
   // barra lateral
   grafica:
     '<path d="M4 4v16h16"/><path d="M8 16v-4"/><path d="M12 16V8"/><path d="M16 16v-6"/>',
+  lupa: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
   personas:
     '<circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c.6-3.4 3.2-5.4 6.5-5.4s5.9 2 6.5 5.4"/><path d="M15.6 4.8a3.4 3.4 0 0 1 0 6.4"/><path d="M17.8 14.9c1.9.8 3.1 2.4 3.6 5.1"/>',
   calendario:
