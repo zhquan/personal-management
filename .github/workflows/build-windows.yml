@@ -1,11 +1,16 @@
+# Compila el instalador de Windows en cada push a main y, cuando el último
+# commit del push empieza por «Release x.y.z», publica una Release versionada:
+#   - actualiza la versión x.y.z en los archivos del proyecto (commit automático),
+#   - crea la etiqueta vx.y.z,
+#   - publica la Release con un resumen de los cambios desde la última release
+#     (nuevas funcionalidades, arreglos, eliminaciones y otros cambios),
+#     agrupados por el tipo convencional del mensaje de cada commit.
 name: Compilar instalador Windows
 
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -18,8 +23,11 @@ jobs:
       run:
         working-directory: web
     steps:
-      - name: Clonar el repositorio
+      - name: Clonar el repositorio (historial completo para el resumen de releases)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Configurar Node.js 22
         uses: actions/setup-node@v4
@@ -48,6 +56,45 @@ jobs:
       - name: Instalar dependencias npm
         run: npm install
 
+      - name: Detectar commit de release («Release x.y.z»)
+        id: release
+        shell: bash
+        run: |
+          mensaje="$(git log -1 --format=%s)"
+          if [[ "$mensaje" =~ ^[Rr]elease[[:space:]]+v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "Último commit de release: se publicará la versión v${BASH_REMATCH[1]}."
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "Push normal: solo se compila el instalador, sin publicar Release."
+          fi
+
+      # Solo cuando el commit es de release: se fija la versión pedida en los
+      # archivos del proyecto para que el instalador salga con ese número.
+      - name: Fijar la versión del release en los archivos del proyecto
+        if: steps.release.outputs.version != ''
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const version = process.env.VERSION;
+          const fijarJson = (ruta) => {
+            const obj = JSON.parse(fs.readFileSync(ruta, 'utf8'));
+            if (typeof obj.version === 'string' && obj.version !== version) {
+              obj.version = version;
+              fs.writeFileSync(ruta, JSON.stringify(obj, null, 2) + '\n');
+            }
+          };
+          ['package.json', 'package-lock.json', 'src-tauri/tauri.conf.json'].forEach(fijarJson);
+          const toml = 'src-tauri/Cargo.toml';
+          const cargo = fs.readFileSync(toml, 'utf8');
+          if (!cargo.includes(`version = "${version}"`)) {
+            fs.writeFileSync(toml, cargo.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`));
+          }
+          NODE
+
       - name: Compilar el instalador .exe (NSIS)
         run: npm run tauri:build -- --bundles nsis
 
@@ -58,24 +105,76 @@ jobs:
           path: web/src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
 
-      - name: Publicar release automatico en cada push a main
-        if: github.ref == 'refs/heads/main'
+      # Solo cuando el último commit empieza por «Release x.y.z»: commit de
+      # versión, etiqueta vx.y.z y Release con el resumen de cambios.
+      - name: Crear Release y etiqueta vx.y.z con el resumen de cambios
+        if: steps.release.outputs.version != ''
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Elimina el release y la etiqueta anteriores (si existen) y crea uno nuevo
-          # apuntando a la ultima commit de main, con el instalador adjunto.
-          gh release delete latest-main --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest-main \
-            src-tauri/target/release/bundle/nsis/*-setup.exe \
-            --target main \
-            --title "Ultima compilacion (main)" \
-            --notes "Instalador de Windows generado automaticamente en cada push a main. Commit: ${{ github.sha }}"
+          set -euo pipefail
+          VERSION="${{ steps.release.outputs.version }}"
+          TAG="v$VERSION"
 
-      - name: Crear release en etiquetas v*
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: web/src-tauri/target/release/bundle/nsis/*-setup.exe
-          generate_release_notes: true
+          # 1) Commit del cambio de versión y push a main (el push con el token
+          #    de GitHub no vuelve a lanzar este workflow).
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "build: versión $VERSION" || true
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:main
+
+          # 2) Crear (o forzar) la etiqueta de la versión, de forma idempotente
+          #    ante reintentos.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          git tag -f "$TAG"
+          git push origin "refs/tags/$TAG" --force
+
+          # 3) Resumen de cambios desde la última release (etiqueta v* anterior),
+          #    o desde el inicio del historial si es la primera. Se usa HEAD^ para
+          #    no contarse a sí misma (la etiqueta se acaba de crear en HEAD).
+          PREV="$(git for-each-ref --merged HEAD^ --format='%(refname:short)' --sort=-v:refname 'refs/tags/v*' | head -n 1 || true)"
+          if [ -n "$PREV" ]; then
+            RANGO="$PREV..HEAD"
+          else
+            INICIO="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            RANGO="$INICIO..HEAD"
+            PREV="el inicio del historial"
+          fi
+
+          NOVEDADES=""; ARREGLOS=""; BORRADOS=""; OTROS=""
+          while IFS= read -r linea; do
+            # Se ignoran el propio commit «Release x.y.z» y el commit de versión automático.
+            if [[ "$linea" =~ ^[Rr]elease[[:space:]] ]] || [[ "$linea" == "build: versión "* ]]; then
+              continue
+            fi
+            if [[ "$linea" == *:* ]]; then
+              tipo="${linea%%:*}"
+              resto="${linea#*: }"
+            else
+              tipo=""
+              resto="$linea"
+            fi
+            case "${tipo,,}" in
+              feat*)                          NOVEDADES+="- $resto"$'\n' ;;
+              fix*)                           ARREGLOS+="- $resto"$'\n' ;;
+              remove*|delete*|drop*|elimin*)  BORRADOS+="- $resto"$'\n' ;;
+              *)                              OTROS+="- $resto"$'\n' ;;
+            esac
+          done < <(git log --no-merges --pretty=format:%s "$RANGO")
+
+          NOTAS="${RUNNER_TEMP}/notas-release.md"
+          : > "$NOTAS"
+          if [ -n "$NOVEDADES" ]; then printf '## ✨ Nuevas funcionalidades\n\n%s\n' "$NOVEDADES" >> "$NOTAS"; fi
+          if [ -n "$ARREGLOS" ]; then printf '## 🐛 Arreglos\n\n%s\n' "$ARREGLOS" >> "$NOTAS"; fi
+          if [ -n "$BORRADOS" ]; then printf '## 🗑️ Eliminaciones\n\n%s\n' "$BORRADOS" >> "$NOTAS"; fi
+          if [ -n "$OTROS" ]; then printf '## 🧹 Otros cambios\n\n%s\n' "$OTROS" >> "$NOTAS"; fi
+          if [ ! -s "$NOTAS" ]; then echo "_No hay cambios registrados desde la última release._" > "$NOTAS"; fi
+
+          # 4) Publicar la Release con el instalador y las notas generadas
+          gh release create "$TAG" \
+            src-tauri/target/release/bundle/nsis/*-setup.exe \
+            --title "Personal-Management $VERSION" \
+            --notes-file "$NOTAS"

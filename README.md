@@ -321,12 +321,22 @@ Salida: `web/src-tauri/target/release/bundle/` (subcarpetas `nsis/` y `msi/`).
 ### Opción C — con GitHub Actions
 
 El repositorio incluye un workflow (`.github/workflows/build-windows.yml`) que compila el
-instalador automáticamente en un runner de Windows:
+instalador automáticamente en un runner de Windows. **No se publica una Release por cada
+push**: solo cuando el último commit del push empieza por **«Release x.y.z»** (p. ej.
+`Release 0.1.0`).
 
-- **Cada push a `main`** → sube el `.exe` como artefacto (`instalador-windows`) y publica o
-  actualiza la *Release* **«Ultima compilacion (main)»** con el instalador.
-- **Pushear una etiqueta `v*`** (p. ej. `v2.1.0`) → crea una *Release* versionada con el `.exe`.
-- **Manual** (pestaña *Actions* → *Run workflow*) → genera solo el artefacto.
+- **Cada push a `main`** → compila el instalador y lo sube como artefacto
+  (`instalador-windows`), sin publicar ninguna *Release*.
+- **Publicar una versión** — haz un push a `main` cuyo último commit tenga el mensaje
+  `Release x.y.z`. El workflow entonces:
+  1. fija la versión `x.y.z` en los archivos del proyecto (commit automático `build: versión`),
+  2. crea y sube la etiqueta **`vx.y.z`**,
+  3. compila el instalador `Personal-Management_x.y.z_…-setup.exe`,
+  4. publica la *Release* **`vx.y.z`** con un **resumen de los cambios desde la última
+     release** —nuevas funcionalidades, arreglos, eliminaciones y otros cambios—,
+     agrupados automáticamente por el tipo del mensaje de cada commit (`feat:`, `fix:`,
+     `remove:`/`delete:`, etc.).
+- **Manual** (pestaña *Actions* → *Run workflow*) → compila y sube solo el artefacto.
 
 > El instalador se genera en **español** (NSIS) y usa WebView2 (ya presente en Windows 10/11), así
 > que el ejecutable instalado es muy ligero. Al no estar firmado, Windows puede mostrar el aviso
