@@ -1,378 +1,369 @@
-# Gestor de Personal — Calendario de Turnos
+# Personal-Management — Shift Calendar
 
-Aplicación **nativa ligera para Windows** construida con **Tauri 2 + Vue 3** (interfaz web moderna
-sobre WebView2, sin Chromium propio: el ejecutable final pesa unos pocos MB). Funciona también en
-cualquier navegador (desarrollo o Docker) con los mismos datos, y sirve para gestionar la plantilla,
-planificar **turnos automáticos quincenales**, llevar **vacaciones y ausencias**, hacer una
-**planificación por horas** de cada jornada, consultar **estadísticas** de la plantilla, y proteger
-todo con **copias de seguridad** y **ajustes de cierre** de la empresa.
+A **lightweight native app for Windows** built with **Tauri 2 + Vue 3** (a modern web UI on top of
+WebView2, no bundled Chromium: the final executable is only a few MB). It also runs in any browser
+(dev or Docker) with the same data, and lets you manage your staff, plan **automatic fortnightly
+shifts**, track **vacations and absences**, do **hour-by-hour planning** of each workday, consult
+**staff statistics**, and protect everything with **backups** and company **closure settings**.
 
-La aplicación se organiza en seis secciones (barra lateral): **Dashboard**, **Plantilla**,
-**Calendario de turnos**, **Vacaciones y ausencias**, **Mantenimiento** y **Ajustes**.
+The app is organized into six sections (sidebar): **Dashboard**, **Staff roster**, **Shift
+calendar**, **Vacations and absences**, **Maintenance** and **Settings**.
 
-> Las capturas de esta guía usan **datos ficticios** para mostrar cómo se ve cada sección con
-> información de ejemplo.
+> The screenshots in this guide use **fictional sample data** to show how each section looks with
+> example information.
 
 ## 📊 Dashboard
 
-![Dashboard: evolución de la plantilla, salario medio, duración media y edades](docs/screenshots/dashboard.png)
+![Dashboard: staff evolution, average salary, average tenure and ages](docs/screenshots/dashboard.png)
 
-Cuatro visualizaciones (SVG propio, sin dependencias externas) que responden a unos **filtros
-generales** comunes:
+Four visualizations (hand-rolled SVG, no external dependencies) that respond to shared **general
+filters**:
 
-- **Estado**: Activos / No activos / Todos (por defecto **Activos**), con contador de cada grupo.
-- **Rango de fechas**: Desde – Hasta (por defecto el **último año**), con botón *Último año* para
-  restablecerlo.
+- **Status**: Active / Not active / All (default **Active**), with a counter for each group.
+- **Date range**: From – To (default the **last year**), with a *Last year* reset button.
 
-Los gráficos:
+The charts:
 
-1. **Altas vs Bajas vs Actual** — línea de tiempo con las altas y bajas ocurridas cada mes y la
-   plantilla al cierre de cada mes dentro del rango.
-2. **Salario bruto medio** — línea de tiempo con la media salarial de quien está en plantilla al
-   cierre de cada mes.
-3. **Duración media** — línea de tiempo con la antigüedad media (en meses) de la plantilla al
-   cierre de cada mes.
-4. **Empleados por rango de edad** — barras verticales en tramos de 5 años (20–25, 25–30, …),
-   con el número sobre cada barra. La edad se calcula a fin del rango (o a día de hoy); quien no
-   tiene fecha de nacimiento se cuenta aparte en la nota y no se representa.
+1. **Hires vs departures vs headcount** — a timeline of hires and departures each month and the
+   headcount at each month-end within the range.
+2. **Average gross salary** — a timeline of the average salary of the staff at each month-end.
+3. **Average tenure** — a timeline of the average tenure (in months) of the staff at each
+   month-end.
+4. **Employees by age range** — vertical bars in 5-year buckets (20–25, 25–30, …), with the count
+   on top of each bar. Age is computed at the end of the range (or today); employees without a
+   birth date are counted separately in the note and not plotted.
 
-Cada punto o barra muestra su valor exacto al pasar el ratón.
+Hovering any point or bar shows its exact value.
 
-## 👥 Plantilla
+## 👥 Staff roster
 
-![Plantilla: listado con buscador, filtro por estado, motivo de baja y columnas ordenables](docs/screenshots/plantilla.png)
+![Staff roster: list with search box, status filter, termination reason and sortable columns](docs/screenshots/plantilla.png)
 
-- **Filtro por estado**: Activos / No activos / Todos, con contadores (**por defecto Activos**).
-- **Buscador único**: un cuadro busca a la vez por **nombre, apellidos, DNI, teléfono y motivo de
-  baja**, y se combina (Y) con el filtro de estado.
-- **Tabla ordenable**: clic en cualquier cabecera (↑/↓ alterna el sentido). Columnas:
-  - **Empleados** — avatar con las iniciales, nombre completo, DNI y estado (activo / baja + fecha).
-  - **Teléfono**.
-  - **Contrato** — tipo de contrato y jornada en horas semanales.
-  - **Antigüedad** — calculada automáticamente desde la fecha de alta («2 años, 3 meses, 5 días»)
-    hasta hoy o hasta su baja.
-  - **Fecha alta**.
-  - **Motivo de baja** — el comentario escrito al causar la baja (hasta dos líneas; el texto
-    completo sale al pasar el ratón).
-  - **Tiempo Recuperable** — suma de todos los apuntes con su signo (formato `+2:30` / `-1:00`);
-    **negativo** = ha hecho horas extra, **positivo** = debe horas a la empresa (por defecto `0:00`).
-  - **Vacaciones {año}** — `usadas / disponibles`. Los disponibles se prorratean por días exactos
-    cuando el alta (o la baja) cae dentro del año en curso (p. ej. alta el 1 de noviembre → 5 días,
-    con 30 anuales), redondeando al día entero más cercano; el tooltip explica el cálculo y la
-    ficha muestra la vista previa en vivo. Si en Ajustes los días de cierre semanal *no* cuentan
-    como vacaciones, las **usadas** se calculan solo en días laborables (el cierre semanal no gasta
-    vacaciones).
-  - Los empleados de baja quedan siempre al final del listado y su fila aparece atenuada.
-- **Scroll vertical interno** con cabecera fija: si la tabla supera la altura de la ventana, se
-  desplaza dentro de su tarjeta en vez de alargar la página.
-- **Ficha del empleado** (modal alta/edición), con grupos:
-  - *Datos personales*: nombre y apellidos (obligatorios), DNI/NIE, nº Seguridad Social, fecha de
-    nacimiento, teléfono, cuenta bancaria (IBAN) y **color identificativo** de una paleta.
-  - *Contrato y retribución*: fecha de alta (con la antigüedad en vivo), tipo de contrato (por
-    defecto *Indefinido*), jornada en horas semanales, salario bruto mensual y días de vacaciones
-    al año (por defecto 30, con vista previa de los que corresponden este año).
-  - *Baja laboral* (solo al editar): fecha de baja (vacío = sigue activo) y **comentario de la
-    baja**, que se verá en la columna «Motivo de baja».
-  - *Notas internas*.
-- **Historial de acciones por empleado**: clic en una fila abre el historial completo (más reciente
-  primero) con cada acción registrada: altas, bajas, cambios de ficha, ausencias y apuntes de
-  tiempo (añadidos, modificados y eliminados). Los cambios de ficha se muestran **campo a campo con
-  el valor anterior tachado → el nuevo** (p. ej. *salario bruto: ~~1500~~ → 1600*). Desde el
-  historial se puede saltar a *Editar ficha*.
+- **Status filter**: Active / Not active / All, with counters (**default Active**).
+- **Single search box**: one box searches **name, last name, ID, phone and termination reason**
+  at once, combined (AND) with the status filter.
+- **Sortable table**: click any header (↑/↓ toggles direction). Columns:
+  - **Employees** — avatar with initials, full name, ID and status (active / terminated + date).
+  - **Phone**.
+  - **Contract** — contract type and weekly hours.
+  - **Tenure** — computed automatically from the start date («2 years, 3 months, 5 days») until
+    today or until the termination date.
+  - **Start date**.
+  - **Termination reason** — the comment written when terminating (up to two lines; the full text
+    appears on hover).
+  - **Recoverable time** — the sum of all time entries with their sign (`+2:30` / `-1:00`);
+    **negative** = worked overtime, **positive** = owes hours to the company (default `0:00`).
+  - **Vacations {year}** — `used / available`. Available days are prorated by exact days when the
+    start (or termination) date falls within the current year (e.g. hired on Nov 1 → 5 days with
+    30 yearly), rounded to the nearest whole day; the tooltip explains the calculation and the
+    profile shows a live preview. If weekly closing days do *not* count as vacation in Settings,
+    the **used** days are only counted on working days (the weekly closure doesn't consume
+    vacation).
+  - Terminated employees always stay at the end of the list and their row is dimmed.
+- **Internal vertical scroll** with sticky header: if the table grows taller than the window it
+  scrolls inside its card instead of stretching the page.
+- **Employee profile** (add/edit modal), with groups:
+  - *Personal details*: first and last name (required), ID/NIE, Social Security number, birth
+    date, phone, bank account (IBAN) and an identifying **color** from a palette.
+  - *Contract and pay*: start date (with live tenure), contract type (default *Permanent*), weekly
+    hours, monthly gross salary and vacation days per year (default 30, with a preview of what
+    corresponds to this year).
+  - *Termination* (edit only): termination date (empty = still active) and **termination
+    comment**, which shows in the «Termination reason» column.
+  - *Internal notes*.
+- **Per-employee action history**: clicking a row opens the full history (most recent first) with
+  every recorded action: hires, terminations, profile changes, absences and time entries (added,
+  modified and removed). Profile changes are shown **field by field with the previous value struck
+  through → the new one** (e.g. *gross salary: ~~1500~~ → 1600*). From the history you can jump to
+  *Edit profile*.
 
-## 🗓️ Calendario de turnos
+## 🗓️ Shift calendar
 
-Planificación **quincenal** (14 días) alineada a la semana laboral configurada en Ajustes (por
-defecto lunes a domingo). Un filtro por estado —**Activos / No activos / Todos**, por defecto
-Activos— decide qué empleados se muestran: quien tiene fecha de baja sigue contando como activo
-mientras la quincena visible incluya la semana de su último día, y pasa a *No activos* después.
-Los días en que la empresa está cerrada aparecen con una **✕** y no se programa a nadie.
+**Fortnightly** planning (14 days) aligned to the working week configured in Settings (default
+Monday to Sunday). A status filter —**Active / Not active / All**, default Active— decides which
+employees are shown: someone with a termination date still counts as active while the visible
+fortnight includes the week of their last day, and moves to *Not active* afterwards. Days on which
+the company is closed show a **✕** and nobody is scheduled.
 
-![Calendario de turnos: quincena con vista Simple, cierres semanales y cambios fijados a mano](docs/screenshots/calendario-turnos.png)
+![Shift calendar: fortnight in Simple view, weekly closures and manually fixed changes](docs/screenshots/calendario-turnos.png)
 
-Hay dos vistas (pestañas **Simple** / **Avanzada**); la Avanzada solo aparece si está activada en
-Ajustes.
+There are two views (tabs **Simple** / **Advanced**); Advanced only appears if enabled in
+Settings.
 
-### Vista Simple
+### Simple view
 
-- Una tabla con **una fila por empleado** y una columna por día, con cabecera *Semana N* sobre cada
-  grupo de días y un **separador más marcado entre la semana 1 y la semana 2**.
-- Cada celda muestra la sigla del turno (M / T / sigla personalizada) con **el color de fondo de su
-  tipo de turno**; el día de hoy se resalta con un contorno verde alrededor de su columna entera.
-- La columna Empleados se ensancha automáticamente para que el **nombre completo salga en una sola
-  línea** (con margen), mientras todos los días conservan exactamente el mismo ancho.
-- Leyenda bajo el título: tipos de turno definidos, Descanso, Ausencia (rayada), Cerrado, Hoy,
-  Cambiado por la empresa y Cambio entre empleados.
+- A table with **one row per employee** and one column per day, with a *Week N* header over each
+  group of days and a **more visible separator between week 1 and week 2**.
+- Each cell shows the shift code (M / T / custom code) with **the background color of its shift
+  type**; today is highlighted with a green outline around its whole column.
+- The Employees column widens automatically so the **full name fits on a single line** (with
+  margin), while all day columns keep exactly the same width.
+- Legend under the title: defined shift types, Day off, Absence (hatched), Closed, Today, Changed
+  by the company and Swapped between employees.
 
-**Editar a mano**: clic en una celda abre el editor con:
+**Manual editing**: click a cell to open the editor with:
 
-- El **turno** (Mañana, Tarde, un turno personalizado o Descanso).
-- El **motivo del cambio**: *Cambio de la empresa* (borde/letra en rojo) o *Cambio entre empleados*
-  (marrón); lo automático no lleva marca.
-- Un **comentario** opcional (motivo, observaciones…).
+- The **shift** (Morning, Afternoon, a custom shift or Day off).
+- The **reason for the change**: *Company change* (red border/text) or *Employee swap* (brown);
+  automatic assignments carry no mark.
+- An optional **comment** (reason, notes…).
 
-También hay *Volver a automático* para quitar lo fijado y dejar que el planificador decida. El
-popup se cierra al hacer clic fuera o con *Escape*. Todo lo fijado a mano y los descansos se
-**conservan al regenerar**; un clic en *Regenerar* recalcula solo la parte automática.
+There's also *Back to automatic* to remove what was fixed and let the planner decide. The popup
+closes when clicking outside or pressing *Escape*. Everything fixed by hand and the days off are
+**kept when regenerating**; clicking *Regenerate* only recalculates the automatic part.
 
-**Cobertura**: si algún turno se queda sin personal un día (vacaciones, bajas, descansos de última
-hora), aparece un aviso con los huecos. Las ausencias se marcan con su sigla (V / B / A / SJ).
+**Coverage**: if a shift ends up understaffed on a day (vacations, terminations, last-minute days
+off), a notice lists the gaps. Absences are marked with their code (V / B / A / SJ).
 
-### Vista Avanzada (plan por horas)
+### Advanced view (hour-by-hour planning)
 
-Una planificación **independiente del calendario M/T** (el planificador automático no la toca):
+Planning **independent of the M/T calendar** (the automatic planner doesn't touch it):
 
-- **Cada columna es un día** de la quincena visible y **cada fila, una franja horaria** de la
-  duración configurada en Ajustes (por defecto 30 min dentro de 06:00–22:00), en **formato de 24 h**
-  (p. ej. `06:00`, `06:30`, …, `21:30`).
-- Dentro de cada día cada empleado ocupa un **carril vertical**: clic en una celda libre para
-  añadir a un empleado con su **Desde – Hasta** (hay atajos con los horarios de los turnos M/T o
-  personalizados definidos). Cada empleado se pinta con su color identificativo y puede tener
-  **varios tramos el mismo día** sin acoplarse (p. ej. 09:00–11:00 y 14:00–18:00).
-- Clic en un tramo ocupado permite **quitarlo** de ese día. Los días cerrados no se pueden
-  planificar.
+- **Each column is a day** of the visible fortnight and **each row is a time slot** of the duration
+  configured in Settings (default 30 min within 06:00–22:00), in **24-hour format** (e.g. `06:00`,
+  `06:30`, …, `21:30`).
+- Inside each day every employee occupies a **vertical lane**: click a free cell to add an employee
+  with their **From – To** (there are shortcuts with the M/T or custom shift times). Each employee
+  is drawn in their identifying color and can have **several non-overlapping blocks the same day**
+  (e.g. 09:00–11:00 and 14:00–18:00).
+- Clicking an occupied block lets you **remove it** for that day. Closed days can't be planned.
 
-### Exportar a PDF
+### Export to PDF
 
-El botón *Exportar PDF* descarga la quincena visible en **A4 horizontal**:
+The *Export PDF* button downloads the visible fortnight in **A4 landscape**:
 
-- Celdas de turno con su color de fondo y sigla (incluidos los turnos personalizados con su color).
-- **Ausencias y días cerrados con la celda rayada** (rayado diagonal grueso, visible por encima de
-  la letra); los cambios a mano solo se marcan con el borde (rojo empresa / marrón intercambio).
-- Columna de empleados con el nombre, sin bolita de color, y un **separador vertical marcado entre
-  las dos semanas**.
-- Leyenda al pie con **siglas de texto** (M = Mañana, T = Tarde, turnos personalizados y
-  V/B/A/SJ = Ausencia), los avisos de cobertura y el estado final.
+- Shift cells with their background color and code (including custom shifts with their color).
+- **Absences and closed days with a hatched cell** (thick diagonal hatching, visible over the
+  letter); manual changes are only marked with the border (red company / brown swap).
+- Employee column with the name, no color dot, and a **marked vertical separator between the two
+  weeks**.
+- Legend at the bottom with **text codes** (M = Morning, T = Afternoon, custom shifts and
+  V/B/A/SJ = Absence), the coverage notices and the final status.
 
-## 🌴 Vacaciones y ausencias
+## 🌴 Vacations and absences
 
-![Vacaciones y ausencias: calendario mensual con filtros de empleado, tipo y estado](docs/screenshots/vacaciones-ausencias.png)
+![Vacations and absences: monthly calendar with employee, type and status filters](docs/screenshots/vacaciones-ausencias.png)
 
-- **Calendario del mes** con flechas ‹ › y botón *Hoy*. Cada día muestra una pastilla por empleado
-  con su color y nombre (o el valor en el caso del tiempo recuperable); si hay más de tres apuntes
-  aparece «+N más».
-- **Filtros**: barra con **Empleado · Tipo · Estado** y botones *Aplicar* / *Quitar filtros*:
-  - *Empleado* — el desplegable se adapta al estado elegido (bajo «Activos» solo salen los que
-    siguen trabajando; bajo «Todos», toda la plantilla).
-  - *Tipo* — Vacaciones, Baja médica, Asuntos propios, Sin justificar o Tiempo recuperable.
-  - *Estado* — Activos / No activos / Todos (por defecto **Activos**).
-  - El calendario, el detalle del día y las listas laterales muestran solo lo que coincide con los
-    filtros aplicados.
-- **Registrar / editar ausencia**: empleado (solo activos; al editar un registro de alguien ya de
-  baja se incluye esa persona para no dejar el formulario vacío), tipo, *Desde* / *Hasta* y
-  comentario opcional. Para el tipo **Vacaciones**, una nota muestra en vivo cuántos días contará
-  el período según el ajuste de Ajustes: *naturales* (con «Sí») o *laborables*, descontando los
-  días de cierre semanal (con «No»).
-- **Tiempo recuperable**: se registra con fecha y un **valor con signo** (`-1:00` = hizo una hora
-  extra, `+2:30` = debe horas), con comentario opcional. Cada apunte aparece en su día del
-  calendario (pastilla verde con el valor) y su suma se refleja en la columna *Tiempo Recuperable*
-  de la Plantilla.
-- **Detalle del día**: clic en un día del calendario muestra todas sus ausencias y apuntes, con
-  editar / eliminar.
-- **Panel lateral**: dos bloques desplegables con las *Ausencias* y el *Tiempo recuperable* del mes
-  visible, también editables desde ahí.
+- **Month calendar** with ‹ › arrows and a *Today* button. Each day shows a pill per employee with
+  their color and name (or the value for recoverable time); if there are more than three entries,
+  «+N more» appears.
+- **Filters**: a bar with **Employee · Type · Status** and *Apply* / *Clear filters* buttons:
+  - *Employee* — the dropdown adapts to the chosen status (under «Active» only current staff
+    appears; under «All», the whole roster).
+  - *Type* — Vacation, Medical leave, Personal leave, Unjustified or Recoverable time.
+  - *Status* — Active / Not active / All (default **Active**).
+  - The calendar, the day detail and the side lists only show what matches the applied filters.
+- **Register / edit an absence**: employee (only active ones; when editing a record of someone
+  already terminated that person is included so the form doesn't end up empty), type, *From* /
+  *To* and optional comment. For the **Vacation** type, a note shows live how many days the period
+  will count according to the Settings option: *calendar* days (with «Yes») or *working* days,
+  deducting the weekly closing days (with «No»).
+- **Recoverable time**: recorded with a date and a **signed value** (`-1:00` = worked one extra
+  hour, `+2:30` = owes hours), with an optional comment. Each entry appears on its calendar day
+  (green pill with the value) and its sum shows in the *Recoverable time* column of the Staff
+  roster.
+- **Day detail**: click a day in the calendar to see all its absences and entries, with
+  edit / delete.
+- **Side panel**: two collapsible blocks with the *Absences* and the *Recoverable time* of the
+  visible month, also editable from there.
 
-## 🔧 Mantenimiento
+## 🔧 Maintenance
 
-![Mantenimiento: exportar e importar, plan de copias automáticas y copias guardadas](docs/screenshots/mantenimiento.png)
+![Maintenance: export and import, backup schedule and saved copies](docs/screenshots/mantenimiento.png)
 
-- **Exportar base de datos** y **Importar base de datos**, en la misma fila: la exportación
-  descarga un `.json` con todos los datos (para guardarlo en una unidad, la nube, etc.); la
-  importación sustituye los datos actuales por los del archivo elegido, con validación.
-- **Planificar copias de seguridad**: activar las copias automáticas, elegir la **frecuencia**
-  (cada día / semana / mes) y cuántas **conservar** (rotación de las últimas N). La comprobación se
-  hace al abrir la aplicación y cada hora mientras esté abierta. También hay botón *Hacer copia
-  ahora*.
-- **Copias guardadas**: listado (con scroll propio si se acumulan) donde cada copia muestra su
-  fecha y hora, un resumen (empleados, ausencias, apuntes y tamaño) y las acciones
-  **Restaurar** / **Eliminar**.
+- **Export database** and **Import database**, on the same row: exporting downloads a `.json` with
+  all the data (to keep on a drive, in the cloud, etc.); importing replaces the current data with
+  the chosen file, with validation.
+- **Schedule backups**: enable automatic backups, choose the **frequency** (every day / week /
+  month) and how many to **keep** (rotation of the latest N). The check runs when the app opens
+  and every hour while it's open. There's also a *Back up now* button.
+- **Saved copies**: a list (with its own scroll if it accumulates) where each copy shows its date
+  and time, a summary (employees, absences, entries and size) and the **Restore** / **Delete**
+  actions.
 
-## ⚙️ Ajustes
+## ⚙️ Settings
 
-![Ajustes: cierres semanales, períodos de cierre, vista Avanzada y tipos de turno](docs/screenshots/ajustes.png)
+![Settings: weekly closures, closure periods, advanced view and shift types](docs/screenshots/ajustes.png)
 
-### Días de cierre semanales
+### Weekly closing days
 
-Botones L · M · X · J · V · S · D para marcar los días de la semana en que la empresa permanece
-cerrada (p. ej. todos los martes): no se generan turnos y el calendario los marca con ✕. Dentro de
-esta tarjeta hay además:
+Buttons L · M · X · J · V · S · D to mark the weekdays on which the company stays closed (e.g.
+every Tuesday): no shifts are generated and the calendar marks them with ✕. Inside this card
+there's also:
 
-- **¿Los días de cierre semanal cuentan como vacaciones?** — Sí / No (por defecto **Sí**). Con
-  «Sí», un período del lunes al domingo con cierre el martes cuenta **7 días naturales**; con «No»,
-  **6 días laborables** (el martes no gasta vacaciones). Afecta al resumen al registrar una
-  ausencia y a la columna de vacaciones de la Plantilla.
-- **Inicio y fin de semana (Calendario de turnos)** — dos selectores para elegir el día en que
-  **empieza** y en que **termina** la semana del Calendario de turnos (por defecto lunes → domingo).
-  Si el martes es día de cierre semanal, se puede poner la semana de **miércoles a lunes**: el
-  martes deja de aparecer en el Calendario de turnos y la quincena se re-alinea a ese inicio.
+- **Do weekly closing days count as vacation?** — Yes / No (default **Yes**). With «Yes», a period
+  from Monday to Sunday with Tuesday closed counts **7 calendar days**; with «No», **6 working
+  days** (Tuesday doesn't consume vacation). This affects the summary when registering an absence
+  and the vacation column of the Staff roster.
+- **Week start and end (Shift calendar)** — two selectors to choose the day on which the Shift
+  calendar week **starts** and **ends** (default Monday → Sunday). If Tuesday is a weekly closing
+  day, you can set the week from **Wednesday to Monday**: Tuesday stops appearing in the Shift
+  calendar and the fortnight re-aligns to that start.
 
-### Períodos de cierre
+### Closure periods
 
-Rangos de fechas en que la empresa cierra (p. ej. vacaciones de la empresa del 03/08 al 25/08).
-Se listan con sus fechas (marcando *en curso* si el período incluye hoy), se pueden quitar y añadir
-nuevos con *Desde* / *Hasta*.
+Date ranges during which the company closes (e.g. company holidays from 03/08 to 25/08). They are
+listed with their dates (marking *in progress* if the period includes today), can be removed, and
+new ones can be added with *From* / *To*.
 
-### Vista Avanzada del calendario
+### Advanced calendar view
 
-Botón **Activar / Desactivar**. Al activarla se despliega el formulario de configuración:
+**Enable / Disable** button. Enabling it unfolds the configuration form:
 
-- Hora de la **primera** y de la **última** franja.
-- **Duración de cada franja en HH:MM** (editable; p. ej. `00:15`, `00:30` o `01:00`; debe dividir
-  el rango en franjas completas).
+- Time of the **first** and of the **last** slot.
+- **Slot duration in HH:MM** (editable; e.g. `00:15`, `00:30` or `01:00`; it must divide the range
+  into whole slots).
 
-Al desactivarla, la vista desaparece de «Calendario de turnos» y su configuración queda oculta,
-pero la planificación por horas guardada se conserva.
+Disabling it makes the view disappear from «Shift calendar» and hides its configuration, but the
+saved hour-by-hour planning is kept.
 
-### Tipos de turno
+### Shift types
 
-- **Mañana (M)** y **Tarde (T)** vienen por defecto con sus colores y horario
-  (06:00–14:00 / 14:00–22:00). Son fijos pero **también se pueden borrar** (dejan de programarse y
-  sus asignaciones a mano se quitan); un botón permite *Restaurar Mañana y Tarde*. Al editarlos
-  solo se puede cambiar su horario.
-- **Añadir turnos personalizados**: una **sigla de un carácter** (letra, número o carácter
-  especial, p. ej. `N`, `2` o `@`), un nombre, un **color** a elección y, opcionalmente, un
-  **horario** (turno «por hora», desde–hasta). Si se marca **automático**, el turno entra en la
-  rotación semanal junto a M y T; si no, solo se asigna a mano.
-- La lista de turnos crece en columnas y, si hay muchos, tiene **scroll interno** para que la
-  página no se alargue sin fin.
+- **Morning (M)** and **Afternoon (T)** come by default with their colors and hours
+  (06:00–14:00 / 14:00–22:00). They are fixed but **can also be deleted** (they stop being
+  scheduled and their manual assignments are removed); a button allows *Restore Morning and
+  Afternoon*. When editing them, only their hours can be changed.
+- **Add custom shifts**: a **one-character code** (letter, number or special character, e.g. `N`,
+  `2` or `@`), a name, a **color** of your choice and, optionally, **hours** (an "hourly" shift,
+  from–to). If marked **automatic**, the shift joins the weekly rotation alongside M and T; if
+  not, it's only assigned manually.
+- The shift list grows in columns and, if there are many, it has **internal scroll** so the page
+  doesn't stretch endlessly.
 
-Al pie de la página se avisa si la empresa está cerrada hoy o si hay un cierre próximo.
+At the bottom of the page a notice warns if the company is closed today or if a closure is coming
+up.
 
-## Dónde se guardan los datos
+## Where the data is stored
 
-Todo se guarda en el **almacenamiento local** de la aplicación (no hay servidor):
+Everything is stored in the app's **local storage** (no server):
 
-- En el navegador (Docker / `npm run dev`) → en el `localStorage` de ese navegador para esa
-  dirección.
-- En la aplicación de Windows → en el almacenamiento de WebView2 del perfil de la app
-  (`%LOCALAPPDATA%\com.gestorpersonal.app\EBWebView\…`), propio de cada usuario del equipo.
+- In the browser (Docker / `npm run dev`) → in that browser's `localStorage` for that address.
+- In the Windows app → in the WebView2 storage of the app profile
+  (`%LOCALAPPDATA%\com.gestorpersonal.app\EBWebView\…`), separate per user of the machine.
 
-Los datos persisten entre sesiones; para sacar una copia fuera de la aplicación, la vía recomendada
-es **Mantenimiento → Exportar base de datos** (un único `.json` legible). Las **copias de
-seguridad programadas** también viven en ese mismo almacenamiento interno, y se gestionan
-(Restaurar / Eliminar) desde la propia aplicación.
+Data persists between sessions; to take a copy outside the app, the recommended way is
+**Maintenance → Export database** (a single readable `.json`). The **scheduled backups** also live
+in that same internal storage, and are managed (Restore / Delete) from within the app.
 
-## Requisitos
+## Requirements
 
-- **Node.js ≥ 20** (desarrollo y preview web).
-- **Windows (para empaquetar el .exe)**: [Rust](https://rustup.rs) (toolchain stable) +
+- **Node.js ≥ 20** (development and web preview).
+- **Windows (to package the .exe)**: [Rust](https://rustup.rs) (stable toolchain) +
   [WebView2](https://developer.microsoft.com/windows/downloads/windows-10-apps/webview2)
-  (viene con Windows 11) y [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/es/visual-cpp-build-tools/).
+  (ships with Windows 11) and [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
 
-## Probar en el navegador (cualquier SO)
+## Try it in the browser (any OS)
 
 ```bash
 cd web
 npm install
-npm run dev        # abre http://localhost:5173
+npm run dev        # opens http://localhost:5173
 ```
 
-O bien con Docker:
+Or with Docker:
 
 ```bash
 docker compose up -d --build   # http://localhost:5173
 ```
 
-## Ejecutar las pruebas y el chequeo de tipos
+## Run the tests and type checking
 
 ```bash
 cd web
-npm test           # vitest (fechas, planificador, tiempo, dashboard, almacén y PDF)
+npm test           # vitest (dates, scheduler, time, dashboard, store and PDF)
 npx vue-tsc --noEmit
 ```
 
-## Empaquetar para Windows (instalador nativo)
+## Package for Windows (native installer)
 
-El instalador **.exe (NSIS)** se genera en un PC con Windows. Requisitos (una sola vez):
+The **.exe (NSIS)** installer is generated on a Windows PC. Requirements (one-time):
 
 1. **Node.js ≥ 20** → https://nodejs.org
-2. **Rust (rustup, toolchain MSVC)** → https://rustup.rs
-3. **Visual Studio 2022 Build Tools** con la carga *Desarrollo para escritorio con C++*
-   (incluye el compilador MSVC y el SDK de Windows) → https://visualstudio.microsoft.com/es/downloads/
-4. **WebView2 Runtime** (ya viene con Windows 11 y con Windows 10 actualizado)
+2. **Rust (rustup, MSVC toolchain)** → https://rustup.rs
+3. **Visual Studio 2022 Build Tools** with the *Desktop development with C++* workload (includes
+   the MSVC compiler and the Windows SDK) → https://visualstudio.microsoft.com/downloads/
+4. **WebView2 Runtime** (already ships with Windows 11 and updated Windows 10)
 
-> El CLI de Tauri descarga automáticamente **NSIS** (y **WiX** si también pides el `.msi`), así que
-> no hay que instalar nada más. La primera compilación tarda ~10-20 min (compila todas las
-> dependencias de Rust); las siguientes son rápidas.
+> The Tauri CLI automatically downloads **NSIS** (and **WiX** if you also request the `.msi`), so
+> nothing else needs to be installed. The first build takes ~10-20 min (it compiles all the Rust
+> dependencies); subsequent ones are fast.
 
-### Opción A — con un solo clic
+### Option A — one click
 
-Copia el proyecto a tu PC Windows, abre PowerShell dentro de la carpeta del proyecto y ejecuta:
+Copy the project to your Windows PC, open PowerShell inside the project folder and run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build-windows.ps1
 ```
 
-Genera `web/src-tauri/target/release/bundle/nsis/…-setup.exe`, abre la carpeta y te la muestra.
-Para generar además el `.msi` (WiX): `build-windows.ps1 -Tipo msi`.
+Generates `web/src-tauri/target/release/bundle/nsis/…-setup.exe`, opens the folder and shows it to
+you. To also generate the `.msi` (WiX): `build-windows.ps1 -Tipo msi`.
 
-### Opción B — a mano
+### Option B — manually
 
 ```bash
 cd web
 npm install
 npm run tauri:build                 # .exe NSIS + .msi (WiX)
-npm run tauri:build -- --bundles nsis   # solo el instalador .exe
-npm run tauri:dev                   # desarrollo con ventana nativa
+npm run tauri:build -- --bundles nsis   # only the .exe installer
+npm run tauri:dev                   # dev with a native window
 ```
 
-Salida: `web/src-tauri/target/release/bundle/` (subcarpetas `nsis/` y `msi/`).
+Output: `web/src-tauri/target/release/bundle/` (`nsis/` and `msi/` subfolders).
 
-### Opción C — con GitHub Actions
+### Option C — with GitHub Actions
 
-El repositorio incluye un workflow (`.github/workflows/build-windows.yml`) que compila el
-instalador automáticamente en un runner de Windows. **No se publica una Release por cada
-push**: solo cuando el último commit del push empieza por **«Release x.y.z»** (p. ej.
-`Release 0.1.0`).
+The repository includes a workflow (`.github/workflows/build-windows.yml`) that builds the
+installer automatically on a Windows runner. **A Release is not published on every push**:
+only when the last commit of the push starts with **«Release x.y.z»** (e.g. `Release 0.1.0`).
 
-- **Cada push a `main`** → compila el instalador y lo sube como artefacto
-  (`instalador-windows`), sin publicar ninguna *Release*.
-- **Publicar una versión** — haz un push a `main` cuyo último commit tenga el mensaje
-  `Release x.y.z`. El workflow entonces:
-  1. fija la versión `x.y.z` en los archivos del proyecto (commit automático `build: versión`),
-  2. crea y sube la etiqueta **`vx.y.z`**,
-  3. compila el instalador `Personal-Management_x.y.z_…-setup.exe`,
-  4. publica la *Release* **`vx.y.z`** con un **resumen de los cambios desde la última
-     release** —nuevas funcionalidades, arreglos, eliminaciones y otros cambios—,
-     agrupados automáticamente por el tipo del mensaje de cada commit (`feat:`, `fix:`,
-     `remove:`/`delete:`, etc.).
-- **Manual** (pestaña *Actions* → *Run workflow*) → compila y sube solo el artefacto.
+- **Every push to `main`** → builds the installer and uploads it as an artifact
+  (`instalador-windows`), without publishing any *Release*.
+- **Publish a version** — push to `main` whose last commit has the message `Release x.y.z`. The
+  workflow then:
+  1. pins the version `x.y.z` in the project files (automatic `build: versión` commit),
+  2. creates and pushes the tag **`vx.y.z`**,
+  3. builds the installer `Personal-Management_x.y.z_…-setup.exe`,
+  4. publishes the *Release* **`vx.y.z`** with a **summary of the changes since the last
+     release** —new features, fixes, removals and other changes— grouped automatically by the
+     conventional type of each commit message (`feat:`, `fix:`, `remove:`/`delete:`, etc.).
+- **Manual** (*Actions* tab → *Run workflow*) → builds and uploads only the artifact.
 
-> El instalador se genera en **español** (NSIS) y usa WebView2 (ya presente en Windows 10/11), así
-> que el ejecutable instalado es muy ligero. Al no estar firmado, Windows puede mostrar el aviso
-> *«Windows protegió su PC»* la primera vez → *Más información* → *Ejecutar de todas formas*.
+> The installer is generated in **Spanish** (NSIS) and uses WebView2 (already present on Windows
+> 10/11), so the installed executable is very light. As it isn't signed, Windows may show the
+> *«Windows protected your PC»* warning the first time → *More info* → *Run anyway*.
 
-## Estructura
+## Structure
 
 ```
 web/
   src/
-    lib/            Lógica de dominio en TypeScript: fechas, horarios, planificador,
-                    almacén (localStorage), dashboard y PDF
+    lib/            Domain logic in TypeScript: dates, hours, scheduler,
+                    store (localStorage), dashboard and PDF
     views/          VistaDashboard · VistaPlantilla · VistaCalendario · VistaAusencias
                     · VistaMantenimiento · VistaAjustes (Vue 3)
-    components/     Icono, Modal, CampoFecha, GraficoLineas, GraficoBarras (UI reutilizable)
-    styles.css      Sistema de diseño (tema claro, acento índigo, Inter/Segoe)
-  src-tauri/        Shell nativo Tauri 2 (Rust) para empaquetar en Windows
-  *.test.ts         Pruebas de fechas, planificador, tiempo, dashboard, almacén y PDF
+    components/     Icono, Modal, CampoFecha, GraficoLineas, GraficoBarras (reusable UI)
+    styles.css      Design system (light theme, indigo accent, Inter/Segoe)
+  src-tauri/        Tauri 2 native shell (Rust) for Windows packaging
+  *.test.ts         Tests for dates, scheduler, time, dashboard, store and PDF
 ```
 
-Las fechas se muestran y se escriben siempre en **dd/mm/aaaa** (campos de fecha propios,
-independientes del idioma del sistema operativo), aunque internamente se guarden como ISO. Las
-horas del calendario avanzado se muestran en **formato de 24 h**.
+Dates are always displayed and entered as **dd/mm/yyyy** (custom date fields, independent of the
+operating system language), although they're stored internally as ISO. Hours in the advanced
+calendar are shown in **24-hour format**.
 
-## Cómo funciona el planificador
+## How the planner works
 
-Cada quincena (14 días alineados con la semana laboral configurada, por defecto semanas ISO) el
-planificador:
+Each fortnight (14 days aligned to the configured working week, default ISO weeks) the planner:
 
-1. Decide el **turno semanal** de cada empleado por rotación respecto a la semana anterior
-   (quien estuvo de mañana pasa al siguiente turno de la rotación, y así con los turnos
-   personalizados marcados como **automáticos**; si Mañana o Tarde se han borrado, no entran).
-2. Día a día asigna a **todo el personal disponible** su turno semanal; si un turno queda por debajo
-   de la cobertura mínima (ausencias, descansos…), se **reajusta** moviendo personal de otro turno
-   con excedente, sin vaciarlo del mínimo.
-3. Respeta **ausencias**, **días de cierre de la empresa** (semanal o por período), **descansos**
-   fijados a mano y **asignaciones manuales**; solo marca un hueco cuando un turno queda sin
-   personal posible.
-4. Al **regenerar** se conserva lo manual y solo se recalculan las asignaciones automáticas.
+1. Decides the **weekly shift** of each employee by rotation from the previous week (whoever was
+   on morning moves to the next shift in the rotation, and so on with custom shifts marked as
+   **automatic**; if Morning or Afternoon have been deleted, they don't take part).
+2. Day by day it assigns **all available staff** their weekly shift; if a shift drops below the
+   minimum coverage (absences, days off…), it **re-balances** by moving staff from another shift
+   with surplus, without emptying it below the minimum.
+3. It respects **absences**, **company closure days** (weekly or by period), manually fixed
+   **days off** and **manual assignments**; it only marks a gap when a shift is left without any
+   possible staff.
+4. When **regenerating**, the manual part is kept and only the automatic assignments are
+   recalculated.
