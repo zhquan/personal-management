@@ -15,6 +15,8 @@ La aplicación se organiza en seis secciones (barra lateral): **Dashboard**, **P
 
 ## 📊 Dashboard
 
+![Dashboard: evolución de la plantilla, salario medio, duración media y edades](docs/screenshots/dashboard.png)
+
 Cuatro visualizaciones (SVG propio, sin dependencias externas) que responden a unos **filtros
 generales** comunes:
 
@@ -37,6 +39,8 @@ Los gráficos:
 Cada punto o barra muestra su valor exacto al pasar el ratón.
 
 ## 👥 Plantilla
+
+![Plantilla: listado con buscador, filtro por estado, motivo de baja y columnas ordenables](docs/screenshots/plantilla.png)
 
 - **Filtro por estado**: Activos / No activos / Todos, con contadores (**por defecto Activos**).
 - **Buscador único**: un cuadro busca a la vez por **nombre, apellidos, DNI, teléfono y motivo de
@@ -83,6 +87,8 @@ defecto lunes a domingo). Un filtro por estado —**Activos / No activos / Todos
 Activos— decide qué empleados se muestran: quien tiene fecha de baja sigue contando como activo
 mientras la quincena visible incluya la semana de su último día, y pasa a *No activos* después.
 Los días en que la empresa está cerrada aparecen con una **✕** y no se programa a nadie.
+
+![Calendario de turnos: quincena con vista Simple, cierres semanales y cambios fijados a mano](docs/screenshots/calendario-turnos.png)
 
 Hay dos vistas (pestañas **Simple** / **Avanzada**); la Avanzada solo aparece si está activada en
 Ajustes.
@@ -140,6 +146,8 @@ El botón *Exportar PDF* descarga la quincena visible en **A4 horizontal**:
 
 ## 🌴 Vacaciones y ausencias
 
+![Vacaciones y ausencias: calendario mensual con filtros de empleado, tipo y estado](docs/screenshots/vacaciones-ausencias.png)
+
 - **Calendario del mes** con flechas ‹ › y botón *Hoy*. Cada día muestra una pastilla por empleado
   con su color y nombre (o el valor en el caso del tiempo recuperable); si hay más de tres apuntes
   aparece «+N más».
@@ -166,6 +174,8 @@ El botón *Exportar PDF* descarga la quincena visible en **A4 horizontal**:
 
 ## 🔧 Mantenimiento
 
+![Mantenimiento: exportar e importar, plan de copias automáticas y copias guardadas](docs/screenshots/mantenimiento.png)
+
 - **Exportar base de datos** y **Importar base de datos**, en la misma fila: la exportación
   descarga un `.json` con todos los datos (para guardarlo en una unidad, la nube, etc.); la
   importación sustituye los datos actuales por los del archivo elegido, con validación.
@@ -178,6 +188,8 @@ El botón *Exportar PDF* descarga la quincena visible en **A4 horizontal**:
   **Restaurar** / **Eliminar**.
 
 ## ⚙️ Ajustes
+
+![Ajustes: cierres semanales, períodos de cierre, vista Avanzada y tipos de turno](docs/screenshots/ajustes.png)
 
 ### Días de cierre semanales
 
