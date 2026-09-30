@@ -2,9 +2,10 @@
 
 A **lightweight native app for Windows** built with **Tauri 2 + Vue 3** (a modern web UI on top of
 WebView2, no bundled Chromium: the final executable is only a few MB). It also runs in any browser
-(dev or Docker) with the same data, and lets you manage your staff, plan **automatic fortnightly
-shifts**, track **vacations and absences**, do **hour-by-hour planning** of each workday, consult
-**staff statistics**, and protect everything with **backups** and company **closure settings**.
+(dev or Docker) with the same data, and lets you manage your staff, plan **automatic shifts by
+week or fortnight**, track **vacations and absences**, do **hour-by-hour planning** of each
+workday, consult **staff statistics**, and protect everything with **backups** and company
+**closure settings**.
 
 The app is organized into six sections (sidebar): **Dashboard**, **Staff roster**, **Shift
 calendar**, **Vacations and absences**, **Maintenance** and **Settings**.
@@ -79,13 +80,14 @@ Hovering any point or bar shows its exact value.
 
 ## 🗓️ Shift calendar
 
-**Fortnightly** planning (14 days) aligned to the working week configured in Settings (default
-Monday to Sunday). A status filter —**Active / Not active / All**, default Active— decides which
-employees are shown: someone with a termination date still counts as active while the visible
-fortnight includes the week of their last day, and moves to *Not active* afterwards. Days on which
-the company is closed show a **✕** and nobody is scheduled.
+Planning aligned to the working week configured in Settings (default Monday to Sunday), with a
+selector to show **one week or two weeks (a fortnight)** at a time. A status filter —**Active /
+Not active / All**, default Active— decides which employees are shown: someone with a termination
+date still counts as active while the visible period includes the week of their last day, and
+moves to *Not active* afterwards. Days on which the company is closed show a **✕** and nobody is
+scheduled.
 
-![Shift calendar: fortnight in Simple view, weekly closures and manually fixed changes](docs/screenshots/calendario-turnos.png)
+![Shift calendar: week in Simple view, weekly closures and manually fixed changes](docs/screenshots/calendario-turnos.png)
 
 There are two views (tabs **Simple** / **Advanced**); Advanced only appears if enabled in
 Settings.
@@ -93,24 +95,33 @@ Settings.
 ### Simple view
 
 - A table with **one row per employee** and one column per day, with a *Week N* header over each
-  group of days and a **more visible separator between week 1 and week 2**.
-- Each cell shows the shift code (M / T / custom code) with **the background color of its shift
-  type**; today is highlighted with a green outline around its whole column.
+  group of days.
+- Each cell shows the **name of the shift** (Morning, Afternoon, custom name) with its hours
+  (e.g. `06:00 – 14:00`) over **the background color of its shift type**; an employee can have
+  **several shifts the same day**, each shown as its own full-height block with name and hours.
+  Today is highlighted with a green outline around its whole column.
+- Taller cells so name and hours read comfortably even with two shifts in one day.
 - The Employees column widens automatically so the **full name fits on a single line** (with
   margin), while all day columns keep exactly the same width.
-- Legend under the title: defined shift types, Day off, Absence (hatched), Closed, Today, Changed
-  by the company and Swapped between employees.
+- Legend under the title: defined shift types with their hours, Day off, Absence (hatched),
+  Closed, Today, Changed by the company and Swapped between employees.
+- With **1 week** selected, the title, the coverage notice and the navigation buttons refer to
+  the week; with **2 weeks**, to the fortnight.
 
-**Manual editing**: click a cell to open the editor with:
+**Manual editing**: click a cell to open a **centered editor** with:
 
-- The **shift** (Morning, Afternoon, a custom shift or Day off).
+- The **shifts**: mark one or several from the list (each uses the hours configured for its type;
+  the first marked one is the main shift). Choosing **Day off (no shifts)** clears the day and
+  the planner keeps treating it as a day off.
 - The **reason for the change**: *Company change* (red border/text) or *Employee swap* (brown);
   automatic assignments carry no mark.
 - An optional **comment** (reason, notes…).
 
-There's also *Back to automatic* to remove what was fixed and let the planner decide. The popup
-closes when clicking outside or pressing *Escape*. Everything fixed by hand and the days off are
-**kept when regenerating**; clicking *Regenerate* only recalculates the automatic part.
+Overlapping shifts the same day are rejected with a clear message (ending at 14:00 and starting
+another shift at 14:00 is allowed). There's also *Back to automatic* to remove what was fixed and
+let the planner decide. The popup closes when clicking outside or pressing *Escape*. Everything
+fixed by hand and the days off are **kept when regenerating**; clicking *Regenerate* only
+recalculates the automatic part.
 
 **Coverage**: if a shift ends up understaffed on a day (vacations, terminations, last-minute days
 off), a notice lists the gaps. Absences are marked with their code (V / B / A / SJ).
@@ -119,9 +130,9 @@ off), a notice lists the gaps. Absences are marked with their code (V / B / A / 
 
 Planning **independent of the M/T calendar** (the automatic planner doesn't touch it):
 
-- **Each column is a day** of the visible fortnight and **each row is a time slot** of the duration
-  configured in Settings (default 30 min within 06:00–22:00), in **24-hour format** (e.g. `06:00`,
-  `06:30`, …, `21:30`).
+- **Each column is a day** of the visible period (one or two weeks) and **each row is a time
+  slot** of the duration configured in Settings (default 30 min within 06:00–22:00), in
+  **24-hour format** (e.g. `06:00`, `06:30`, …, `21:30`).
 - Inside each day every employee occupies a **vertical lane**: click a free cell to add an employee
   with their **From – To** (there are shortcuts with the M/T or custom shift times). Each employee
   is drawn in their identifying color and can have **several non-overlapping blocks the same day**
@@ -130,15 +141,17 @@ Planning **independent of the M/T calendar** (the automatic planner doesn't touc
 
 ### Export to PDF
 
-The *Export PDF* button downloads the visible fortnight in **A4 landscape**:
+The *Export PDF* button downloads the visible period (week or fortnight) in **A4 landscape**:
 
-- Shift cells with their background color and code (including custom shifts with their color).
-- **Absences and closed days with a hatched cell** (thick diagonal hatching, visible over the
-  letter); manual changes are only marked with the border (red company / brown swap).
-- Employee column with the name, no color dot, and a **marked vertical separator between the two
-  weeks**.
-- Legend at the bottom with **text codes** (M = Morning, T = Afternoon, custom shifts and
-  V/B/A/SJ = Absence), the coverage notices and the final status.
+- Plain white cells with **black outlines and text**: each shift cell shows the **shift name**
+  with its hours underneath; with several shifts the same day, the cell stacks one block per
+  shift, each with its own name and hours.
+- **Absences and closed days with a hatched cell** (diagonal hatching); no colored backgrounds
+  or origin borders are drawn.
+- Employee column with the name, and only the coverage notices and final status at the bottom.
+
+The Advanced view has its own *Export PDF* that downloads the **hour-by-hour plan** (columns =
+days, rows = time slots, one colored lane per employee working the slot).
 
 ## 🌴 Vacations and absences
 
@@ -198,7 +211,7 @@ there's also:
 - **Week start and end (Shift calendar)** — two selectors to choose the day on which the Shift
   calendar week **starts** and **ends** (default Monday → Sunday). If Tuesday is a weekly closing
   day, you can set the week from **Wednesday to Monday**: Tuesday stops appearing in the Shift
-  calendar and the fortnight re-aligns to that start.
+  calendar and the planning periods re-align to that start.
 
 ### Closure periods
 
@@ -354,7 +367,7 @@ calendar are shown in **24-hour format**.
 
 ## How the planner works
 
-Each fortnight (14 days aligned to the configured working week, default ISO weeks) the planner:
+Each period (14 days aligned to the configured working week, default ISO weeks) the planner:
 
 1. Decides the **weekly shift** of each employee by rotation from the previous week (whoever was
    on morning moves to the next shift in the rotation, and so on with custom shifts marked as
