@@ -355,7 +355,7 @@ const avisoHoyCerrado = computed(() => {
           <h3 class="titulo-tarjeta"><Icono nombre="reloj" :tam="15" /> Vista Avanzada del calendario</h3>
           <p class="descripcion" style="margin-bottom: 0">
             La vista <b>Avanzada</b> de «Calendario de turnos» es un plan por horas: cada columna
-            es un día de la quincena y cada fila, una franja de la duración que elijas. Haz clic en
+            es un día del período visible (semana o quincena) y cada fila, una franja de la duración que elijas. Haz clic en
             una celda para asignar empleados con su horario (desde–hasta); cada empleado se pinta
             con su color.
           </p>

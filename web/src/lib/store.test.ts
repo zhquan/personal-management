@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { plantillaEmpleado } from "./types";
+import {  plantillaEmpleado
+} from "./types";
 import {
   anyadirPeriodoCierre,
   copiasGuardadas,
@@ -25,6 +26,7 @@ import {
   quitarPlanAvanzado,
   quitarPlanAvanzadoPorId,
   quitarTipoTurno,
+  quitarTurnoConHoras,
   restaurarCopia,
   restaurarTurnosBase,
   setDiasCierre,
@@ -294,6 +296,45 @@ describe("editarDia con origen y comentario", () => {
     editarDia(INICIO, "2026-09-10", 3, null);
     expect(state.asignaciones.some((a) => a.fecha === "2026-09-10" && a.empleadoId === 3)).toBe(false);
     expect(state.descansos).toContain("3|2026-09-10");
+  });
+
+  it("permite varios turnos con horas el mismo día si no se solapan", () => {
+    const msg1 = editarDia(INICIO, "2026-09-11", 3, "M", "empresa", "", { desde: "09:00", hasta: "12:00" });
+    expect(msg1).toBe("");
+    const msg2 = editarDia(INICIO, "2026-09-11", 3, "T", "empresa", "", { desde: "15:00", hasta: "18:00" });
+    expect(msg2).toBe("");
+    const delDia = state.asignaciones.filter((a) => a.fecha === "2026-09-11" && a.empleadoId === 3 && a.origen !== "auto");
+    expect(delDia).toHaveLength(2);
+    expect(delDia.map((a) => `${a.desde}–${a.hasta}`).sort()).toEqual(["09:00–12:00", "15:00–18:00"]);
+  });
+
+  it("rechaza turnos con horas solapadas el mismo día", () => {
+    editarDia(INICIO, "2026-09-08", 2, "M", "empresa", "", { desde: "09:00", hasta: "14:00" });
+    // Solape total
+    expect(editarDia(INICIO, "2026-09-08", 2, "T", "empresa", "", { desde: "10:00", hasta: "12:00" }))
+      .toContain("solapa");
+    // Solape parcial (empisa antes de que termine el anterior)
+    expect(editarDia(INICIO, "2026-09-08", 2, "T", "empresa", "", { desde: "13:30", hasta: "16:00" }))
+      .toContain("solapa");
+    // Turnos adyacentes (termina 14:00, empieza 14:00) sí se permiten
+    expect(editarDia(INICIO, "2026-09-08", 2, "T", "empresa", "", { desde: "14:00", hasta: "17:00" }))
+      .toBe("");
+  });
+
+  it("rechaza horas inválidas o con inicio posterior al fin", () => {
+    expect(editarDia(INICIO, "2026-09-08", 3, "M", "empresa", "", { desde: "abc", hasta: "12:00" }))
+      .toContain("válidas");
+    expect(editarDia(INICIO, "2026-09-08", 3, "M", "empresa", "", { desde: "15:00", hasta: "12:00" }))
+      .toContain("anterior");
+  });
+
+  it("quitarTurnoConHoras elimina solo el tramo indicado", () => {
+    editarDia(INICIO, "2026-09-09", 1, "M", "empresa", "", { desde: "08:00", hasta: "11:00" });
+    editarDia(INICIO, "2026-09-09", 1, "T", "empresa", "", { desde: "16:00", hasta: "19:00" });
+    quitarTurnoConHoras(INICIO, "2026-09-09", 1, "08:00", "11:00", "M");
+    const restantes = state.asignaciones.filter((a) => a.fecha === "2026-09-09" && a.empleadoId === 1 && a.origen !== "auto");
+    expect(restantes).toHaveLength(1);
+    expect(restantes[0].desde).toBe("16:00");
   });
 
   it("exportarDatos solo persiste lo fijado a mano (empresa o intercambio)", () => {

@@ -1,6 +1,7 @@
 # Compila el instalador de Windows en cada push a main y, cuando el último
 # commit del push empieza por «Release x.y.z», publica una Release versionada:
-#   - actualiza la versión x.y.z en los archivos del proyecto (commit automático),
+#   - comprueba que el fichero VERSION coincide con x.y.z y propaga la versión
+#     al resto de archivos del proyecto (commit automático),
 #   - crea la etiqueta vx.y.z,
 #   - publica la Release con un resumen de los cambios desde la última release
 #     (nuevas funcionalidades, arreglos, eliminaciones y otros cambios),
@@ -69,31 +70,23 @@ jobs:
             echo "Push normal: solo se compila el instalador, sin publicar Release."
           fi
 
-      # Solo cuando el commit es de release: se fija la versión pedida en los
-      # archivos del proyecto para que el instalador salga con ese número.
+      # Solo cuando el commit es de release: la versión sale del fichero VERSION
+      # (fuente única de verdad) y se propaga al resto de ficheros del proyecto
+      # para que el instalador salga con ese número.
       - name: Fijar la versión del release en los archivos del proyecto
         if: steps.release.outputs.version != ''
         shell: bash
         env:
           VERSION: ${{ steps.release.outputs.version }}
+        working-directory: .
         run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const version = process.env.VERSION;
-          const fijarJson = (ruta) => {
-            const obj = JSON.parse(fs.readFileSync(ruta, 'utf8'));
-            if (typeof obj.version === 'string' && obj.version !== version) {
-              obj.version = version;
-              fs.writeFileSync(ruta, JSON.stringify(obj, null, 2) + '\n');
-            }
-          };
-          ['package.json', 'package-lock.json', 'src-tauri/tauri.conf.json'].forEach(fijarJson);
-          const toml = 'src-tauri/Cargo.toml';
-          const cargo = fs.readFileSync(toml, 'utf8');
-          if (!cargo.includes(`version = "${version}"`)) {
-            fs.writeFileSync(toml, cargo.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`));
-          }
-          NODE
+          set -euo pipefail
+          version_fichero="$(tr -d '[:space:]' < VERSION)"
+          if [ "$version_fichero" != "$VERSION" ]; then
+            echo "::error::El fichero VERSION ($version_fichero) no coincide con la versión del commit de release ($VERSION)."
+            exit 1
+          fi
+          node scripts/sync-version.mjs
 
       - name: Compilar el instalador .exe (NSIS)
         run: npm run tauri:build -- --bundles nsis
