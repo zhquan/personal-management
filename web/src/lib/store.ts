@@ -1195,14 +1195,95 @@ export function tieneDescanso(fecha: Fecha, empleadoId: number): boolean {
   return state.descansos.includes(`${empleadoId}|${fecha}`);
 }
 
+/** Quita un turno concreto con horas de un empleado en un día (la combinación
+ *  fecha+empleado+horas es única: no se puede añadir el mismo tramo dos veces). */
+export function quitarTurnoConHoras(
+  inicio: Fecha,
+  fecha: Fecha,
+  empleadoId: number,
+  desde: string,
+  hasta: string,
+  turno: Turno
+) {
+  const antes = state.asignaciones.length;
+  state.asignaciones = state.asignaciones.filter(
+    (a) =>
+      !(a.fecha === fecha &&
+        a.empleadoId === empleadoId &&
+        a.desde === desde &&
+        a.hasta === hasta &&
+        a.turno === turno));
+  if (state.asignaciones.length !== antes) {
+    guardar();
+    regenerarFortnight(inicio);
+  }
+}
+
 export function asignacionDe(fecha: Fecha, empleadoId: number): Asignacion | undefined {
   return state.asignaciones.find((a) => a.fecha === fecha && a.empleadoId === empleadoId);
 }
 
+/** Todas las asignaciones (0..n) de un empleado en una fecha. */
+export function asignacionesDe(fecha: Fecha, empleadoId: number): Asignacion[] {
+  return state.asignaciones.filter((a) => a.fecha === fecha && a.empleadoId === empleadoId);
+}
+
+/**
+ * Sustituye todas las asignaciones de un empleado en una fecha por la lista dada
+ * (ya validada): un turno principal sin horas + adicionales con horario, o nada
+ * (descanso). Recalcula el plan automático del período.
+ */
+export function fijarAsignacionesDia(
+  inicio: Fecha,
+  fecha: Fecha,
+  empleadoId: number,
+  asignaciones: Asignacion[]
+) {
+  state.asignaciones = state.asignaciones.filter(
+    (a) => !(a.fecha === fecha && a.empleadoId === empleadoId));
+  state.descansos = state.descansos.filter((d) => d !== `${empleadoId}|${fecha}`);
+  if (asignaciones.length === 0) {
+    // Sin turnos = descanso: hay que marcarlo explícitamente o el plan
+    // automático volvería a rellenar el día al regenerar la quincena.
+    state.descansos.push(`${empleadoId}|${fecha}`);
+  }
+  for (const a of asignaciones) state.asignaciones.push({ ...a, fecha, empleadoId });
+  guardar();
+  regenerarFortnight(inicio);
+}
+
+/**
+ * True si el tramo [desde, hasta) del turno nuevo se solapa con otro turno ya
+ * fijado a mano ese mismo día para el empleado (rango medio-abierto: p. ej.
+ * terminar a las 14:00 y empezar otra a las 14:00 es válido; pisarse, no).
+ */
+export function solapanTurnosManuales(
+  fecha: Fecha,
+  empleadoId: number,
+  desde: string,
+  hasta: string
+): boolean {
+  const a = minutosDe(desde);
+  const b = minutosDe(hasta);
+  if (a === null || b === null) return false;
+  return state.asignaciones.some(
+    (x) =>
+      x.fecha === fecha &&
+      x.empleadoId === empleadoId &&
+      x.origen !== "auto" &&
+      !!x.desde && !!x.hasta &&
+      (minutosDe(x.desde) ?? 0) < b &&
+      (minutosDe(x.hasta) ?? 0) > a);
+}
+
 /**
  * Edita el día de un empleado:
- *  * turno "M"|"T": fija ese turno a mano, con origen (empresa o intercambio
- *    entre empleados) y comentario opcional;
+ *  * turno "M"|"T" (o personalizado): fija ese turno a mano, con origen (empresa
+ *    o intercambio entre empleados) y comentario opcional. Si se indican
+ *    `horas`, el turno se AÑADE como jornada horada (un empleado puede tener
+ *    varios turnos el mismo día siempre que no se solapen) y devuelve "" o un
+ *    mensaje de error; sin `horas` sustituye lo que hubiera (comportamiento de
+ *    siempre).
  *  * turno null: descanso (sin asignación ese día).
  */
 export function editarDia(
@@ -1211,8 +1292,32 @@ export function editarDia(
   empleadoId: number,
   turno: Turno | null,
   origen: Exclude<Origen, "auto"> = "empresa",
-  comentario = ""
-) {
+  comentario = "",
+  horas?: { desde: string; hasta: string }
+): string {
+  if (horas) {
+    // Añadir un turno con horas (varios turnos al día, sin solapes).
+    if (!turno) return "Elige un turno para añadir con horario.";
+    const a = normalizarHora(horas.desde);
+    const b = normalizarHora(horas.hasta);
+    if (!a || !b) return "Indica una hora de inicio y de fin válidas (HH:MM).";
+    if (a >= b) return "La hora de inicio debe ser anterior a la de fin.";
+    if (solapanTurnosManuales(fecha, empleadoId, a, b)) {
+      return "Ese empleado ya tiene un turno que se solapa con esas horas ese día.";
+    }
+    state.asignaciones.push({
+      fecha,
+      turno,
+      empleadoId,
+      origen,
+      comentario: comentario.trim() || undefined,
+      desde: a,
+      hasta: b
+    });
+    guardar();
+    regenerarFortnight(inicio);
+    return "";
+  }
   state.asignaciones = state.asignaciones.filter(
     (a) => !(a.fecha === fecha && a.empleadoId === empleadoId));
   state.descansos = state.descansos.filter((d) => d !== `${empleadoId}|${fecha}`);
@@ -1229,6 +1334,7 @@ export function editarDia(
   }
   guardar();
   regenerarFortnight(inicio);
+  return "";
 }
 
 /** Devuelve la celda a control automático (quita manual y descanso). */

@@ -136,6 +136,10 @@ export interface Asignacion {
   origen: Origen;
   /** Comentario libre al fijar el turno a mano (motivo, observaciones…). */
   comentario?: string;
+  /** Hora de inicio (HH:MM) de la jornada; solo en turnos fijados a mano. */
+  desde?: string;
+  /** Hora de fin (HH:MM) de la jornada; solo en turnos fijados a mano. */
+  hasta?: string;
 }
 
 /**
