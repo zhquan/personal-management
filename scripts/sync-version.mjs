@@ -50,10 +50,11 @@ fijarTexto("web/package.json", /^(\s*"version": ")[^"]+(")/m, 'la clave "version
 fijarTexto("web/src-tauri/tauri.conf.json", /^(\s*"version": ")[^"]+(")/m, 'la clave "version"');
 
 // package-lock.json: la versión aparece en la raíz y en el paquete "" (ambos
-// con name "gestor-personal"); las de las dependencias no se tocan.
+// con name "gestor-personal"); las de las dependencias no se tocan. Se admite
+// \r?\n porque en Windows el checkout puede traer finales de línea CRLF.
 fijarTexto(
   "web/package-lock.json",
-  /("name": "gestor-personal",\n\s*"version": ")[^"]+(")/g,
+  /("name": "gestor-personal",\r?\n\s*"version": ")[^"]+(")/g,
   "la versión raíz y la del paquete"
 );
 
