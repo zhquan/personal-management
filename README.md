@@ -334,7 +334,8 @@ only when the last commit of the push starts with **«Release x.y.z»** (e.g. `R
   (`instalador-windows`), without publishing any *Release*.
 - **Publish a version** — push to `main` whose last commit has the message `Release x.y.z`. The
   workflow then:
-  1. pins the version `x.y.z` in the project files (automatic `build: versión` commit),
+  1. checks that the `VERSION` file matches `x.y.z` and propagates that version to the project
+     files (automatic `build: versión` commit),
   2. creates and pushes the tag **`vx.y.z`**,
   3. builds the installer `Personal-Management_x.y.z_…-setup.exe`,
   4. publishes the *Release* **`vx.y.z`** with a **summary of the changes since the last
@@ -345,6 +346,22 @@ only when the last commit of the push starts with **«Release x.y.z»** (e.g. `R
 > The installer is generated in **Spanish** (NSIS) and uses WebView2 (already present on Windows
 > 10/11), so the installed executable is very light. As it isn't signed, Windows may show the
 > *«Windows protected your PC»* warning the first time → *More info* → *Run anyway*.
+
+## Versioning
+
+The `VERSION` file at the repository root is the **single source of truth** for the app version.
+After editing it, run:
+
+```bash
+cd web
+npm run version
+```
+
+That command (also run automatically before `npm test`) propagates the version to `package.json`,
+`package-lock.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, so the other files
+never drift out of sync. To publish a release, push to `main` with a last commit message
+`Release x.y.z` matching the `VERSION` file — the workflow verifies that both match and fails the
+release if they don't.
 
 ## Structure
 
