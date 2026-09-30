@@ -74,7 +74,7 @@ onMounted(() => {
         </button>
       </nav>
       <div class="pie-lateral">
-        Calendario quincenal de turnos<br />
+        Calendario de turnos<br />
         Mañana · Tarde
       </div>
     </aside>
