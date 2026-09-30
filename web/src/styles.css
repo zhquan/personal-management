@@ -403,7 +403,7 @@ h1, h2, h3, p { margin: 0; }
   line-height: 1.25;
 }
 .celda-turno {
-  height: 34px;
+  height: 52px;
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;

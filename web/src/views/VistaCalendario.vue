@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref } from "vue";
 import Icono from "../components/Icono.vue";
 import {
+  asignacionesDe,
   diaEnSemanaLaboral,
   editarDia,
   empleadosOrdenados,
   esDiaCerrado,
+  fijarAsignacionesDia,
   franjasVistaAvanzada,
   guardarPlanAvanzado,
   huecosPorQuincena,
@@ -15,17 +17,25 @@ import {
   quitarPlanAvanzadoPorId,
   regenerarFortnight,
   restaurarAuto,
+  setSemanasCalendario,
   state
 } from "../lib/store";
 import { minutosAFormato, minutosDe } from "../lib/horario";
 import type { Franja } from "../lib/horario";
 import { addDays, diasQuincena, fmt, hoy, nombreDia, nombreDiaCorto, semanaISO } from "../lib/dates";
 import { nombreCompleto, tintaSobre, tipoInfo } from "../lib/types";
-import type { CeldaPdf, FilaPdf } from "../lib/pdf";
+import type { CeldaPdf, CeldaPdfPlan, FilaPdf } from "../lib/pdf";
 import type { Asignacion, Ausencia, Empleado, Fecha, Origen, PlanAvanzado, TipoTurno, Turno } from "../lib/types";
 
 const inicio = ref<Fecha>(inicioQuincena(hoy()));
-const dias = computed(() => diasQuincena(inicio.value));
+/** Con «1 semana» en el selector, qué mitad de la quincena se muestra
+ *  (0 = primera, 1 = segunda). El plan automático siempre se genera por
+ *  quincena completa; esto solo recorta lo visible. */
+const verSemana = ref<0 | 1>(hoy() >= addDays(inicioQuincena(hoy()), 7) ? 1 : 0);
+const dias = computed(() =>
+  state.semanasCalendario === 1
+    ? diasQuincena(inicio.value).slice(verSemana.value * 7, verSemana.value * 7 + 7)
+    : diasQuincena(inicio.value));
 /** Solo los días que caen dentro de la semana laboral configurada (p. ej.
  *  miércoles a lunes: el martes no aparece). La quincena se alinea al día de
  *  inicio, así que ambas semanas tienen los mismos días visibles. */
@@ -69,10 +79,10 @@ const mensajeVacio = computed(() => {
     return { titulo: "Aún no hay empleados registrados.", sub: "Añade empleados en «Plantilla»." };
   }
   if (filtroEstado.value === "activos") {
-    return { titulo: "No hay empleados activos en esta quincena.", sub: "Cambia el filtro a «No activos» o «Todos»." };
+    return { titulo: `No hay empleados activos en esta ${state.semanasCalendario === 1 ? "semana" : "quincena"}.`, sub: "Cambia el filtro a «No activos» o «Todos»." };
   }
   if (filtroEstado.value === "noactivos") {
-    return { titulo: "No hay empleados de baja en esta quincena.", sub: "Cambia el filtro a «Todos»." };
+    return { titulo: `No hay empleados de baja en esta ${state.semanasCalendario === 1 ? "semana" : "quincena"}.`, sub: "Cambia el filtro a «Todos»." };
   }
   return { titulo: "", sub: "" };
 });
@@ -328,12 +338,30 @@ function quitarBloqueAv(idBloque: number) {
 
 // ----------------------------------------------------------------- navegación
 function navegar(delta: number) {
-  inicio.value = quincenaVecina(inicio.value, delta);
+  if (state.semanasCalendario === 1) {
+    // Avance semanal: dentro de la misma quincena cambia la mitad visible;
+    // al cruzar el límite salta a la quincena vecina (siempre alineada).
+    const nueva = verSemana.value + delta;
+    if (nueva === 0 || nueva === 1) {
+      verSemana.value = nueva;
+    } else {
+      inicio.value = quincenaVecina(inicio.value, delta);
+      verSemana.value = delta > 0 ? 0 : 1;
+    }
+  } else {
+    inicio.value = quincenaVecina(inicio.value, delta);
+  }
   regenerarFortnight(inicio.value);
 }
 function irHoy() {
   inicio.value = inicioQuincena(hoy());
+  verSemana.value = hoy() >= addDays(inicio.value, 7) ? 1 : 0;
   regenerarFortnight(inicio.value);
+}
+/** Cambia cuántas semanas se muestran (1 o 2); al pasar a 1 salta a la semana actual. */
+function cambiarSemanas(n: 1 | 2) {
+  setSemanasCalendario(n);
+  if (n === 1) verSemana.value = hoy() >= addDays(inicio.value, 7) ? 1 : 0;
 }
 function regenerar() {
   regenerarFortnight(inicio.value);
@@ -355,14 +383,28 @@ onBeforeUnmount(() => {
 // O(1) (fecha → empleado); antes cada celda barría el array global de
 // asignaciones/ausencias, con coste cuadrático al crecer la plantilla.
 type EstadoCelda =
-  | { tipo: "turno"; turno: Turno; origen: Origen; comentario?: string; color?: string; tinta?: string }
+  | { tipo: "turno"; turno: Turno; origen: Origen; comentario?: string; color?: string; tinta?: string; desde?: string; hasta?: string }
   | { tipo: "descanso" }
   | { tipo: "cerrado" }
   | { tipo: "ausencia"; sigla: string; tipoNombre: string }
   | { tipo: "vacio" };
 
+/** Texto de una celda de turno: sigla y, si tiene horario, las horas debajo. */
+interface TextoCeldaTurno {
+  /** Sigla del turno («M», «T», personalizado). */
+  sigla: string;
+  /** Nombre del turno («Mañana», «Tarde», el del personalizado). */
+  nombre: string;
+  /** Horario «06:00–14:00» si el turno lo tiene; si no, vacío. */
+  horas: string;
+  color?: string;
+  tinta?: string;
+}
+
 interface Celda {
   fecha: Fecha;
+  /** Un elemento por turno: un empleado puede tener varios el mismo día. */
+  turnos: TextoCeldaTurno[];
   estado: EstadoCelda;
   clase: string;
   /** Estilo inline para turnos personalizados (fondo y letra de su color). */
@@ -426,8 +468,9 @@ const filas = computed<Fila[]>(() => {
   const finExcl = addDays(ini, diasArr.length);
   const ultimo = diasArr[diasArr.length - 1];
 
-  // Índices del período: asignación y ausencia por (fecha → empleado).
-  const asigPorDia = new Map<Fecha, Map<number, Asignacion>>();
+  // Índices del período: asignaciones (0..n, puede haber varias con horas) y
+  // ausencia por (fecha → empleado).
+  const asigPorDia = new Map<Fecha, Map<number, Asignacion[]>>();
   for (const a of state.asignaciones) {
     if (a.fecha < ini || a.fecha >= finExcl) continue;
     let m = asigPorDia.get(a.fecha);
@@ -435,7 +478,9 @@ const filas = computed<Fila[]>(() => {
       m = new Map();
       asigPorDia.set(a.fecha, m);
     }
-    m.set(a.empleadoId, a);
+    const lista = m.get(a.empleadoId);
+    if (lista) lista.push(a);
+    else m.set(a.empleadoId, [a]);
   }
 
   const ausPorDia = new Map<Fecha, Map<number, Ausencia>>();
@@ -462,6 +507,7 @@ const filas = computed<Fila[]>(() => {
     const celdas: Celda[] = visibles.map((f) => {
       let estado: EstadoCelda;
       let estilo: Record<string, string> | undefined;
+      let turnos: TextoCeldaTurno[] = [];
       if (cerrados.has(f)) {
         estado = { tipo: "cerrado" };
       } else {
@@ -470,12 +516,33 @@ const filas = computed<Fila[]>(() => {
           const info = tipoInfo(aus.tipo);
           estado = { tipo: "ausencia", sigla: info.sigla, tipoNombre: info.nombre };
         } else {
-          const a = asigPorDia.get(f)?.get(e.id);
-          if (a) {
-            estado = { tipo: "turno", turno: a.turno, origen: a.origen, comentario: a.comentario };
-            // Turnos personalizados: fondo y letra según su color.
-            if (a.turno !== "M" && a.turno !== "T") {
+          // Todos los turnos del empleado ese día: automáticos (sin horas),
+          // y a mano con/sin horas. Varios a mano con horas = jornadas partidas.
+          const delDia = (asigPorDia.get(f)?.get(e.id) ?? ([] as Asignacion[])).slice()
+            .sort((a, b) =>
+              (minutosDe(a.desde ?? "") ?? 0) - (minutosDe(b.desde ?? "") ?? 0) ||
+              a.turno.localeCompare(b.turno));
+          if (delDia.length) {
+            const primero = delDia[0];
+            estado = { tipo: "turno", turno: primero.turno, origen: primero.origen, comentario: primero.comentario };
+            turnos = delDia.map((a) => {
+              const esBase = a.turno === "M" || a.turno === "T";
               const info = infoTurno(a.turno);
+              const color = !esBase ? info.color : undefined;
+              const tinta = color ? tintaSobre(color) : undefined;
+              // Horas propias si las tiene (fijadas a mano); si no, el horario
+              // del tipo de turno (también M/T). Así la celda muestra siempre
+              // las horas, haya uno o varios turnos.
+              let horas = a.desde && a.hasta ? `${a.desde}–${a.hasta}` : "";
+              if (!horas) {
+                const t = state.tiposTurno.find((x) => x.sigla === a.turno);
+                if (t?.desde && t?.hasta) horas = `${t.desde}–${t.hasta}`;
+              }
+              return { sigla: a.turno, nombre: info?.nombre || a.turno, horas, color, tinta };
+            });
+            // Celda con fondo de su color si hay un único turno personalizado.
+            if (delDia.length === 1 && delDia[0].turno !== "M" && delDia[0].turno !== "T") {
+              const info = infoTurno(delDia[0].turno);
               if (info.color) {
                 estado.color = info.color;
                 estado.tinta = tintaSobre(info.color);
@@ -489,10 +556,13 @@ const filas = computed<Fila[]>(() => {
       return {
         fecha: f,
         estado,
+        turnos,
         estilo,
         clase: claseCelda(estado, f),
         texto: textoCelda(estado),
-        titulo: tituloCelda(nombre, f, estado)
+        titulo: turnos.length > 1
+          ? `${nombre} · ${nombreDia(f)}, ${fmt(f)}\n${turnos.map((t) => `${t.sigla}${t.horas ? ` ${t.horas}` : ""}`).join(" + ")}`
+          : tituloCelda(nombre, f, estado)
       };
     });
     return { e, celdas };
@@ -505,38 +575,98 @@ const popup = reactive<{ x: number; y: number; visible: boolean; empleado: Emple
 });
 
 const popoverEl = ref<HTMLElement | null>(null);
+/** Aviso de validación del editor (horas mal puestas o solapadas). */
+const avisoPopup = ref("");
 
-/** Borrador del editor: turno elegido, motivo del cambio y comentario. */
+/**
+ * Borrador del editor. `turnos` es el CONJUNTO de turnos marcados de la lista:
+ * el primero es el principal de la celda y el resto turnos adicionales. Un
+ * turno marcado admite horario propio (por defecto, el de su tipo de turno);
+ * al guardar se validan solapes entre horarios.
+ */
 const borradorPopup = reactive<{
-  turno: Turno | null;
+  /** Siglas marcadas, en orden (0 = sin turnos = descanso). */
+  turnos: Turno[];
+  /** Horario personalizado por sigla (vacío = usar el del tipo de turno). */
+  horas: Record<string, { desde: string; hasta: string }>;
   origen: Exclude<Origen, "auto">;
   comentario: string;
-}>({ turno: "M", origen: "empresa", comentario: "" });
+}>({ turnos: [], horas: {}, origen: "empresa", comentario: "" });
 
-function abrirEditor(event: MouseEvent, fila: Fila, celda: Celda) {
+function alternarTurnoBorrador(sigla: Turno) {
+  const i = borradorPopup.turnos.indexOf(sigla);
+  if (i >= 0) {
+    borradorPopup.turnos.splice(i, 1);
+    delete borradorPopup.horas[sigla];
+  } else {
+    borradorPopup.turnos.push(sigla);
+  }
+  avisoPopup.value = "";
+}
+/** Horario efectivo de un turno marcado: el personalizado o el de su tipo. */
+function horasDeTurno(sigla: Turno): { desde: string; hasta: string } | undefined {
+  const propia = borradorPopup.horas[sigla];
+  if (propia?.desde && propia?.hasta) return propia;
+  const t = state.tiposTurno.find((x) => x.sigla === sigla);
+  return t?.desde && t?.hasta ? { desde: t.desde, hasta: t.hasta } : undefined;
+}
+/** Turnos ya fijados a mano con horas para la celda abierta. */
+const turnosManuales = computed(() => {
+  if (!popup.empleado || !popup.fecha) return [];
+  return asignacionesDe(popup.fecha, popup.empleado.id)
+    .filter((a) => a.origen !== "auto" && a.desde && a.hasta)
+    .sort((a, b) => (minutosDe(a.desde ?? "") ?? 0) - (minutosDe(b.desde ?? "") ?? 0));
+});
+/** Turnos horados actuales cuyo sigla NO está marcado: se quitarán al guardar. */
+const turnosQuitar = computed(() =>
+  turnosManuales.value.filter((a) => !borradorPopup.turnos.includes(a.turno)));
+
+function abrirEditor(fila: Fila, celda: Celda) {
   if (celda.estado.tipo === "ausencia" || celda.estado.tipo === "cerrado") {
     cerrarPopup(); // no se edita un día de ausencia ni un día cerrado
     return;
   }
   // Precarga el borrador con el estado actual de la celda.
+  borradorPopup.horas = {};
+  avisoPopup.value = "";
   if (celda.estado.tipo === "turno") {
-    borradorPopup.turno = celda.estado.turno;
+    // Marcados = todos los turnos actuales de la celda (por orden horario).
+    borradorPopup.turnos = celda.turnos.map((t) => t.sigla);
+    // Si el turno único tiene horas propias (a mano), se precargan para editarlas.
+    if (celda.turnos.length === 1 && celda.estado.desde && celda.estado.hasta) {
+      borradorPopup.horas[celda.estado.turno] = { desde: celda.estado.desde, hasta: celda.estado.hasta };
+    }
     borradorPopup.origen = celda.estado.origen === "intercambio" ? "intercambio" : "empresa";
     borradorPopup.comentario = celda.estado.comentario ?? "";
   } else if (celda.estado.tipo === "descanso") {
-    borradorPopup.turno = null;
+    borradorPopup.turnos = [];
     borradorPopup.origen = "empresa";
     borradorPopup.comentario = "";
   } else {
-    borradorPopup.turno = turnoPorDefecto();
+    const def = turnoPorDefecto();
+    borradorPopup.turnos = def ? [def] : [];
     borradorPopup.origen = "empresa";
     borradorPopup.comentario = "";
   }
   popup.empleado = fila.e;
   popup.fecha = celda.fecha;
-  popup.x = Math.min(event.clientX, window.innerWidth - 190);
-  popup.y = Math.min(event.clientY, window.innerHeight - 400);
+  // El popup siempre sale centrado en pantalla, con independencia de dónde
+  // esté la celda pulsada (posición provisional centrada hasta medirlo).
+  popup.x = Math.round(window.innerWidth / 2 - 130);
+  popup.y = Math.round(window.innerHeight / 2 - 180);
   popup.visible = true;
+  // Tras el render se centra con el tamaño real (y por si el layout aún se
+  // estaba asentando, se repasa una vez más).
+  const centrarPopup = () => {
+    const rect = popoverEl.value?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    popup.x = Math.max(8, Math.round((window.innerWidth - rect.width) / 2));
+    popup.y = Math.max(8, Math.round((window.innerHeight - rect.height) / 2));
+  };
+  void nextTick(centrarPopup);
+  // Segunda pasada por si el primer nextTick midió antes de asentar el layout.
+  const t = window.setTimeout(centrarPopup, 60);
+  onScopeDispose(() => clearTimeout(t));
 }
 function cerrarPopup() {
   popup.visible = false;
@@ -564,18 +694,81 @@ function alTeclaEsc(event: KeyboardEvent) {
   if (popup.visible) cerrarPopup();
   if (popupAv.visible) cerrarPopupAv();
 }
+/**
+ * Guarda la selección: un turno sin horarios = asignación clásica (sustituye);
+ * varios turnos o con horario = uno principal + adicionales con horas
+ * (validando que no se solapen). Devuelve "" o el mensaje de error.
+ */
+function guardarSeleccionPopup(): string {
+  if (!popup.fecha || !popup.empleado) return "";
+  const turnoPrincipal = borradorPopup.turnos[0];
+  // Con VARIOS turnos marcados, cada uno se guarda con su horario (el a carta
+  // si se puso, o el de su tipo de turno). Con UNO solo se mantiene el
+  // comportamiento clásico: sin horas, salvo que la celda ya las tuviera.
+  const multiple = borradorPopup.turnos.length > 1;
+  const conHorario = borradorPopup.turnos
+    .map((s) => {
+      const h = multiple
+        ? horasDeTurno(s)
+        : (() => { const p = borradorPopup.horas[s]; return p?.desde && p?.hasta ? p : undefined; })();
+      return { sigla: s, horas: h };
+    })
+    .filter((x): x is { sigla: Turno; horas: { desde: string; hasta: string } } => !!x.horas)
+    .map((x) => ({ sigla: x.sigla, ...x.horas }));
+  // Sin solapes entre los tramos nuevos (rangos medio-abiertos).
+  const ordenados = [...conHorario].sort((a, b) => (minutosDe(a.desde) ?? 0) - (minutosDe(b.desde) ?? 0));
+  for (let i = 1; i < ordenados.length; i++) {
+    if ((minutosDe(ordenados[i].desde) ?? 0) < (minutosDe(ordenados[i - 1].hasta) ?? 0)) {
+      return `Los horarios de ${ordenados[i - 1].sigla} (${ordenados[i - 1].desde}–${ordenados[i - 1].hasta}) y ${ordenados[i].sigla} (${ordenados[i].desde}–${ordenados[i].hasta}) se solapan.`;
+    }
+  }
+  const asigs: Asignacion[] = [];
+  if (turnoPrincipal) {
+    const pr = ordenados.find((x) => x.sigla === turnoPrincipal);
+    asigs.push({
+      fecha: popup.fecha,
+      turno: turnoPrincipal,
+      empleadoId: popup.empleado.id,
+      origen: borradorPopup.origen,
+      comentario: borradorPopup.comentario.trim() || undefined,
+      ...(pr ? { desde: pr.desde, hasta: pr.hasta } : {})
+    });
+  }
+  for (const x of ordenados) {
+    if (x.sigla === turnoPrincipal) continue;
+    asigs.push({
+      fecha: popup.fecha,
+      turno: x.sigla,
+      empleadoId: popup.empleado.id,
+      origen: borradorPopup.origen,
+      comentario: borradorPopup.comentario.trim() || undefined,
+      desde: x.desde,
+      hasta: x.hasta
+    });
+  }
+  fijarAsignacionesDia(inicio.value, popup.fecha, popup.empleado.id, asigs);
+  return "";
+}
+
 /** Aplica el turno, el motivo y el comentario elegidos en el editor. */
 function fijar() {
   if (!popup.fecha || !popup.empleado) return;
-  editarDia(
-    inicio.value,
-    popup.fecha,
-    popup.empleado.id,
-    borradorPopup.turno,
-    borradorPopup.origen,
-    borradorPopup.comentario
-  );
+  const msg = guardarSeleccionPopup();
+  avisoPopup.value = msg;
+  if (msg) return; // solape: el popup sigue abierto mostrando el motivo
   cerrarPopup();
+}
+/** Color de fondo para la muestra de un turno en el popup. */
+function colorTipoDe(turno: Turno): string {
+  const t = state.tiposTurno.find((x) => x.sigla === turno);
+  if (!t) return turno === "M" ? "var(--manana)" : turno === "T" ? "var(--tarde)" : "var(--borde)";
+  return colorTipo(t);
+}
+/** Color de letra para la muestra de un turno en el popup. */
+function tintaTipoDe(turno: Turno): string {
+  const t = state.tiposTurno.find((x) => x.sigla === turno);
+  if (!t) return turno === "M" ? "var(--manana-tinta)" : turno === "T" ? "var(--tarde-tinta)" : "var(--tinta)";
+  return tintaSobre(t.color);
 }
 function volverAuto() {
   if (!popup.fecha || !popup.empleado) return;
@@ -592,6 +785,9 @@ const estadoActual = computed(() => {
 
 // ------------------------------------------------------------------- huecos
 const huecos = computed(() => huecosPorQuincena.get(inicio.value) ?? []);
+/** Huecos del período visible (con 1 semana, solo esa mitad de la quincena). */
+const huecosVisibles = computed(() =>
+  huecos.value.filter((h) => h.fecha >= dias.value[0] && h.fecha <= dias.value[dias.value.length - 1]));
 
 // ------------------------------------------------------------- exportar PDF
 async function exportarPdf() {
@@ -600,11 +796,18 @@ async function exportarPdf() {
     color: e.color,
     celdas: celdas.map((c): CeldaPdf => {
       if (c.estado.tipo === "turno") {
+        // Todos los turnos del empleado ese día (con horas si las tienen).
+        const turnosDia = c.turnos.map((t) => ({
+          turno: t.sigla,
+          color: t.color,
+          desde: t.horas ? t.horas.split("–")[0] : undefined,
+          hasta: t.horas ? t.horas.split("–")[1] : undefined
+        }));
         return {
           turno: c.estado.turno,
           clase: "turno",
           color: c.estado.color,
-          origen: c.estado.origen === "empresa" || c.estado.origen === "intercambio" ? c.estado.origen : undefined
+          turnosDia
         };
       }
       if (c.estado.tipo === "descanso") return { turno: null, clase: "descanso" };
@@ -613,7 +816,7 @@ async function exportarPdf() {
       return { turno: null, clase: "vacio" };
     })
   }));
-  const avisos = huecos.value.filter((h) => diaEnSemanaLaboral(h.fecha)).map((h) => {
+  const avisos = huecosVisibles.value.filter((h) => diaEnSemanaLaboral(h.fecha)).map((h) => {
     const nombre = h.turno === "M" ? "mañana" : h.turno === "T" ? "tarde" : infoTurno(h.turno).nombre;
     return `${fmt(h.fecha)} · turno de ${nombre} sin cubrir`;
   });
@@ -623,8 +826,45 @@ async function exportarPdf() {
     filas: filasPdf,
     avisos,
     dias: diasVisibles.value,
+    // Con 1 semana visible, toda la tabla es la primera semana.
+    diasSemana1: state.semanasCalendario === 1 ? diasVisibles.value.length : visiblesSemana1.value.length,
+    turnos: state.tiposTurno.map((t) => ({
+      sigla: t.sigla,
+      nombre: t.nombre,
+      color: t.color,
+      desde: t.desde,
+      hasta: t.hasta
+    }))
+  });
+}
+
+/** Exporta el plan por horas (vista Avanzada): filas = franjas, columnas = días. */
+async function exportarPdfAvanzada() {
+  const diasArr = diasVisibles.value;
+  // Una fila por franja; cada celda lleva los empleados activos en esa franja
+  // (los días cerrados van rayados y sin contenido, como en la vista).
+  const celdas: CeldaPdfPlan[][] = filasPlan.value.map((fila) =>
+    fila.celdas.map((cel): CeldaPdfPlan => ({
+      cerrado: cel.cerrado,
+      empleados: cel.cerrado
+        ? []
+        : cel.carriles
+            .filter((c) => c.activo && c.tramos.length)
+            .map((c) => ({
+              nombre: nombreCompleto(c.e),
+              color: c.e.color,
+              desde: c.tramos[0].desde,
+              hasta: c.tramos[0].hasta
+            }))
+    })));
+  const { exportarPdfPlanHoras } = await import("../lib/pdf");
+  exportarPdfPlanHoras({
+    inicio: inicio.value,
+    dias: diasArr,
     diasSemana1: visiblesSemana1.value.length,
-    turnos: state.tiposTurno.map((t) => ({ sigla: t.sigla, nombre: t.nombre, color: t.color }))
+    franjas: franjas.value.map((fr) => ({ desde: fr.desde, hasta: fr.hasta })),
+    celdas,
+    duracionFranjaMin: state.duracionFranjaVistaAvanzada
   });
 }
 
@@ -650,6 +890,14 @@ function tintaTipo(t: TipoTurno): string {
 function turnoPorDefecto(): Turno | null {
   return state.tiposTurno[0]?.sigla ?? null;
 }
+
+/** Fondo a sangre completa para el sub-bloque de un turno (su color en pantalla). */
+function fondoTurnoDe(t: TextoCeldaTurno): Record<string, string> | undefined {
+  if (t.color) return { background: t.color, color: t.tinta ?? "#fff" };
+  if (t.sigla === "M") return { background: "var(--manana-suave)", color: "var(--manana-tinta)" };
+  if (t.sigla === "T") return { background: "var(--tarde)", color: "var(--tarde-tinta)" };
+  return undefined;
+}
 </script>
 
 <template>
@@ -658,8 +906,7 @@ function turnoPorDefecto(): Turno | null {
       <div>
         <h1>Calendario de turnos</h1>
         <p class="sub">
-          Quincena del <strong>{{ fmt(dias[0]) }}</strong> al <strong>{{ fmt(dias[13]) }}</strong>
-          · semanas {{ semanaISO(dias[0]) }} y {{ semanaISO(dias[7]) }}
+          {{ state.semanasCalendario === 1 ? `Semana del ${fmt(dias[0])} al ${fmt(dias[dias.length - 1])} · semana ${semanaISO(dias[0])}` : `Quincena del ${fmt(dias[0])} al ${fmt(dias[13])} · semanas ${semanaISO(dias[0])} y ${semanaISO(dias[7])}` }}
         </p>
       </div>
       <div class="acciones-pagina">
@@ -670,6 +917,10 @@ function turnoPorDefecto(): Turno | null {
             :class="{ activo: vistaEfectiva === 'avanzada' }"
             @click="cambiarVista('avanzada')"
           >Avanzada</button>
+        </div>
+        <div class="vista-tabs" role="group" aria-label="Semanas mostradas">
+          <button :class="{ activo: state.semanasCalendario === 1 }" @click="cambiarSemanas(1)">1 semana</button>
+          <button :class="{ activo: state.semanasCalendario === 2 }" @click="cambiarSemanas(2)">2 semanas</button>
         </div>
         <div v-if="vistaEfectiva === 'simple'" class="filtro-estado" role="group" aria-label="Filtrar por estado">
           <button
@@ -686,13 +937,17 @@ function turnoPorDefecto(): Turno | null {
           </button>
         </div>
         <span style="width: 2px"></span>
-        <button class="btn-redondo-nav" title="Quincena anterior" @click="navegar(-1)"><Icono nombre="flechaIzq" /></button>
+        <button class="btn-redondo-nav" :title="state.semanasCalendario === 1 ? 'Semana anterior' : 'Quincena anterior'" @click="navegar(-1)"><Icono nombre="flechaIzq" /></button>
         <button class="btn chico" @click="irHoy">Hoy</button>
-        <button class="btn-redondo-nav" title="Quincena siguiente" @click="navegar(1)"><Icono nombre="flechaDer" /></button>
-        <template v-if="vista === 'simple'">
+        <button class="btn-redondo-nav" :title="state.semanasCalendario === 1 ? 'Semana siguiente' : 'Quincena siguiente'" @click="navegar(1)"><Icono nombre="flechaDer" /></button>
+        <template v-if="vistaEfectiva === 'simple'">
           <span style="width: 2px"></span>
           <button class="btn" title="Regenerar asignaciones automáticas" @click="regenerar"><Icono nombre="recargar" /> Regenerar</button>
           <button class="btn primario" title="Exportar a PDF" @click="exportarPdf"><Icono nombre="descargar" /> Exportar PDF</button>
+        </template>
+        <template v-else-if="vistaEfectiva === 'avanzada'">
+          <span style="width: 2px"></span>
+          <button class="btn primario" title="Exportar a PDF" @click="exportarPdfAvanzada"><Icono nombre="descargar" /> Exportar PDF</button>
         </template>
       </div>
     </header>
@@ -701,6 +956,7 @@ function turnoPorDefecto(): Turno | null {
     <div v-if="vistaEfectiva === 'simple'" style="display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--subtitulo)">
       <span v-for="t in state.tiposTurno" :key="t.id" style="display: inline-flex; align-items: center; gap: 5px">
         <span class="punto" :style="{ background: colorTipo(t) }"></span> {{ t.nombre }} ({{ t.sigla }})
+        <span v-if="t.desde || t.hasta" style="color: var(--apagado); font-weight: 600; font-size: 11px">{{ t.desde || "?" }} – {{ t.hasta || "?" }}</span>
         <span v-if="t.automatico" style="color: var(--apagado); font-size: 10px">auto</span>
       </span>
       <span style="display: inline-flex; align-items: center; gap: 5px"><span class="punto" style="background: var(--superficie-2); border: 1px solid var(--borde)"></span> Descanso</span>
@@ -785,7 +1041,7 @@ function turnoPorDefecto(): Turno | null {
         <span>Revisa en «Ajustes» el rango de la vista Avanzada: la hora de inicio debe ser anterior a la de fin.</span>
       </div>
       <div v-else class="tarjeta vacio-mensaje">
-        Añade empleados en «Plantilla» para planificar la quincena por horas.
+        Añade empleados en «Plantilla» para planificar por horas.
       </div>
     </div>
 
@@ -795,7 +1051,7 @@ function turnoPorDefecto(): Turno | null {
           <tr class="primer-fila">
             <th class="nombre-col" :style="{ width: anchoColEmpleados + 'px' }"></th>
             <th class="sep-semana" :colspan="visiblesSemana1.length">Semana {{ semanaISO(dias[0]) }}</th>
-            <th class="sep-semana" :colspan="visiblesSemana2.length">Semana {{ semanaISO(dias[7]) }}</th>
+            <th v-if="state.semanasCalendario === 2" class="sep-semana" :colspan="visiblesSemana2.length">Semana {{ semanaISO(dias[7]) }}</th>
           </tr>
           <tr>
             <th class="nombre-col" style="text-align: left; padding: 7px 10px">Empleados</th>
@@ -823,8 +1079,18 @@ function turnoPorDefecto(): Turno | null {
               :class="[c.clase, { 'inicio-semana': c.fecha === dias[7] }]"
               :style="c.estilo"
               :title="c.titulo"
-              @click="abrirEditor($event, fila, c)"
-            >{{ c.texto }}</td>
+              @click="abrirEditor(fila, c)"
+            >
+              <!-- Con uno o más turnos: sub-bloques apilados a sangre completa
+                   (el fondo cubre nombre y horas). -->
+              <template v-if="c.turnos.length">
+                <span v-for="(t, i) in c.turnos" :key="i" class="celda-multi" :style="fondoTurnoDe(t)">
+                  <span class="celda-nombre">{{ t.nombre }}</span>
+                  <span v-if="t.horas" class="celda-horas">{{ t.horas }}</span>
+                </span>
+              </template>
+              <template v-else>{{ c.texto }}</template>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -835,17 +1101,17 @@ function turnoPorDefecto(): Turno | null {
       <div style="color: var(--subtitulo); font-weight: 500">{{ mensajeVacio.sub }}</div>
     </div>
 
-    <div v-if="vistaEfectiva === 'simple' && huecos.length" class="aviso-banda">
+    <div v-if="vistaEfectiva === 'simple' && huecosVisibles.length" class="aviso-banda">
       <Icono nombre="alarma" />
       <span>
         <strong>Aviso de cobertura:</strong>
-        {{ huecos.map((h) => `${fmt(h.fecha)} (${h.turno})`).join(", ") }}
+        {{ huecosVisibles.filter((h) => diaEnSemanaLaboral(h.fecha)).map((h) => `${fmt(h.fecha)} (${h.turno})`).join(", ") }}
       </span>
     </div>
     <div v-else-if="vistaEfectiva === 'simple' && empleados.length" style="display: flex; align-items: center; gap: 8px; font-size: 13px">
       <template v-if="state.tiposTurno.length">
         <Icono nombre="corazon" :tam="15" style="color: #0f7a35" />
-        <span style="color: #0f7a35; font-weight: 600">Todos los turnos cubiertos todos los días de la quincena.</span>
+        <span style="color: #0f7a35; font-weight: 600">Todos los turnos cubiertos todos los días de la {{ state.semanasCalendario === 1 ? "semana" : "quincena" }}.</span>
       </template>
       <template v-else>
         <Icono nombre="alarma" :tam="15" />
@@ -862,29 +1128,52 @@ function turnoPorDefecto(): Turno | null {
             {{ popup.fecha ? `${nombreDia(popup.fecha)} · ${fmt(popup.fecha)}` : "" }}
           </div>
           <div class="pop-sep"></div>
-          <div class="pop-etiqueta">Turno</div>
-          <button
-            v-for="t in state.tiposTurno"
-            :key="t.id"
-            class="pop-item"
-            :class="{ activo: borradorPopup.turno === t.sigla }"
-            @click="borradorPopup.turno = t.sigla"
-          >
-            <span class="muestra" :style="{ background: colorTipo(t), color: tintaTipo(t) }">{{ t.sigla }}</span>
-            <span style="display: inline-flex; flex-direction: column; line-height: 1.2">
-              {{ t.nombre }}
-              <span v-if="t.desde || t.hasta" style="font-size: 10px; color: var(--apagado); font-weight: 500">
-                {{ t.desde || "?" }}–{{ t.hasta || "?" }}
+          <div class="pop-etiqueta">Turnos (clic para marcar varios)</div>
+          <!-- Lista desplazable: con muchos turnos el popup no puede crecer sin límite.
+               Multiselección: todos los marcados se guardan para ese día (el primero
+               es el principal; cada uno usa el horario de su tipo o uno a carta). -->
+          <div class="pop-lista-turnos">
+            <button
+              v-for="t in state.tiposTurno"
+              :key="t.id"
+              class="pop-item"
+              :class="{ activo: borradorPopup.turnos.includes(t.sigla) }"
+              @click="alternarTurnoBorrador(t.sigla)"
+            >
+              <span class="muestra" :style="{ background: colorTipo(t), color: tintaTipo(t) }">{{ t.sigla }}</span>
+              <span style="display: inline-flex; flex-direction: column; line-height: 1.2; flex: 1; text-align: left">
+                {{ t.nombre }}
+                <span v-if="t.desde || t.hasta" style="font-size: 10px; color: var(--apagado); font-weight: 500">
+                  {{ t.desde || "?" }}–{{ t.hasta || "?" }}
+                </span>
               </span>
-            </span>
-          </button>
-          <button class="pop-item" :class="{ activo: borradorPopup.turno === null }" @click="borradorPopup.turno = null">
-            <span class="muestra" style="background: var(--superficie-2); color: var(--apagado)">—</span>
-            Descanso
-          </button>
-          <template v-if="borradorPopup.turno">
-            <div class="pop-sep"></div>
-            <div class="pop-etiqueta">Motivo del cambio</div>
+              <span v-if="borradorPopup.turnos.includes(t.sigla)" class="pop-orden">{{ borradorPopup.turnos.indexOf(t.sigla) === 0 ? "principal" : "+" }}</span>
+            </button>
+            <button class="pop-item" :class="{ activo: borradorPopup.turnos.length === 0 }" @click="borradorPopup.turnos = []; borradorPopup.horas = {}">
+              <span class="muestra" style="background: var(--superficie-2); color: var(--apagado)">—</span>
+              Descanso (sin turnos)
+            </button>
+          </div>
+          <template v-if="borradorPopup.turnos.length">
+            <!-- Turnos horados ya existentes ese día que se van a QUITAR (desmarcados). -->
+            <template v-if="turnosQuitar.length">
+              <div class="pop-etiqueta" style="color: var(--peligro)">Se quitará</div>
+              <button
+                v-for="t in turnosQuitar"
+                :key="`${t.turno}-${t.desde}-${t.hasta}`"
+                class="pop-item"
+                title="Desmarcado: se quitará al guardar"
+                @click="alternarTurnoBorrador(t.turno)"
+              >
+                <span class="muestra" :style="{ background: colorTipoDe(t.turno) }"></span>
+                <span style="display: inline-flex; flex-direction: column; line-height: 1.2; text-align: left">
+                  {{ t.turno }}
+                  <span style="font-size: 10px; color: var(--apagado); font-weight: 500">{{ t.desde }}–{{ t.hasta }} · desmarcado</span>
+                </span>
+              </button>
+            </template>
+          <div class="pop-sep"></div>
+          <div class="pop-etiqueta">Motivo del cambio</div>
             <button class="pop-item" :class="{ activo: borradorPopup.origen === 'empresa' }" @click="borradorPopup.origen = 'empresa'">
               <span class="muestra" style="background: var(--empresa-suave); color: var(--empresa); border: 1px solid var(--empresa)"></span>
               Cambio de la empresa
@@ -907,9 +1196,10 @@ function turnoPorDefecto(): Turno | null {
             <span class="muestra" style="background: var(--acento-suave); color: var(--acento)">A</span>
             Volver a automático
           </button>
+          <p v-if="avisoPopup" class="nota nota-error" style="padding: 4px 10px 0; font-size: 11px">{{ avisoPopup }}</p>
           <button class="pop-item pop-guardar" @click="fijar()">
             <span class="muestra" style="background: var(--ok-suave); color: var(--ok)">✓</span>
-            Guardar
+            {{ borradorPopup.turnos.length > 1 ? "Guardar turnos" : "Guardar" }}
           </button>
         </div>
       </div>
@@ -1219,6 +1509,74 @@ function turnoPorDefecto(): Turno | null {
   background: transparent;
 }
 .tabla-plan-dias .plan-carril.activo { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06); }
+
+/* Editor de celda: con muchos turnos la lista se desplaza y el popup nunca
+   supera la altura de la ventana. */
+.popover-editor {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  /* Siempre entero en pantalla: ancho al contenido, sin pasarse de ventana. */
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+}
+.pop-lista-turnos {
+  display: flex;
+  flex-direction: column;
+  max-height: 208px;
+  overflow-y: auto;
+}
+.pop-lista-turnos .pop-item { flex: none; }
+
+/* Celdas con varios turnos (o uno con horario): sigla y horas apiladas. */
+.celda-multi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  line-height: 1.05;
+  padding: 0;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.celda-multi + .celda-multi { border-top: 1px dashed var(--borde-suave); }
+.celda-nombre {
+  font-weight: 700;
+  font-size: 10.5px;
+  line-height: 1.15;
+  text-align: center;
+  padding: 0 2px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.celda-horas {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+/* Muestra de sigla en listas del editor (p. ej. turnos a quitar). */
+.pop-horas-fila .muestra {
+  width: 24px;
+  height: 20px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  flex: none;
+}
+.pop-orden {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--acento);
+  border: 1px solid var(--acento-borde);
+  border-radius: 999px;
+  padding: 1px 6px;
+  flex: none;
+}
 
 /* Popup de la vista Avanzada. */
 .popover-av { min-width: 270px; max-width: 320px; }
