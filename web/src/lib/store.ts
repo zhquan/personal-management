@@ -47,6 +47,8 @@ interface AppData {
   planAvanzada: PlanAvanzado[];
   /** La vista Avanzada del calendario está activada (visible y configurable). */
   vistaAvanzadaActivada: boolean;
+  /** Semanas mostradas en el Calendario de turnos: 1 o 2. */
+  semanasCalendario: 1 | 2;
 }
 
 const vacio = (): AppData => ({
@@ -67,7 +69,8 @@ const vacio = (): AppData => ({
   hastaVistaAvanzada: RANGO_VISTA_POR_DEFECTO.hasta,
   duracionFranjaVistaAvanzada: MINUTOS_FRANJA,
   planAvanzada: [],
-  vistaAvanzadaActivada: true
+  vistaAvanzadaActivada: true,
+  semanasCalendario: 2
 });
 
 /** Valida y normaliza un tramo de planificación de la vista Avanzada (o lo descarta). */
@@ -642,7 +645,8 @@ export function exportarDatos(): AppData {
       hastaVistaAvanzada: state.hastaVistaAvanzada,
       duracionFranjaVistaAvanzada: state.duracionFranjaVistaAvanzada,
       planAvanzada: state.planAvanzada,
-      vistaAvanzadaActivada: state.vistaAvanzadaActivada
+      vistaAvanzadaActivada: state.vistaAvanzadaActivada,
+      semanasCalendario: state.semanasCalendario
     })
   ) as AppData;
 }
@@ -720,6 +724,7 @@ export function importarDatos(raw: unknown): ResultadoImport {
     : MINUTOS_FRANJA;
   state.duracionFranjaVistaAvanzada = durImportada >= 10 && durImportada <= 240 ? durImportada : MINUTOS_FRANJA;
   state.version = VERSION_DATOS;
+  state.semanasCalendario = d.semanasCalendario === 1 ? 1 : 2;
   guardar();
   huecosPorQuincena.clear();
   regenerarAlrededor();
@@ -758,6 +763,17 @@ export function setFinSemanaLaboral(dia: number) {
   state.finSemanaLaboral = dia;
   guardar();
   regenerarAlrededor();
+}
+
+/** Semanas mostradas en el Calendario de turnos: 1 o 2 (quincena). */
+export function setSemanasCalendario(n: 1 | 2) {
+  state.semanasCalendario = n;
+  guardar();
+}
+
+/** Días que abarca el período visible del calendario (7 u 14 según la preferencia). */
+export function diasPorPeriodoCalendario(): number {
+  return state.semanasCalendario === 1 ? 7 : 14;
 }
 
 /**
