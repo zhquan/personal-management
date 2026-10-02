@@ -20,7 +20,10 @@ import {
   guardarTiempo,
   guardarTipoTurno,
   historialDeEmpleado,
+  horasDeAsignacion,
+  horasTrabajadasSemana,
   importarDatos,
+  setColumnasOcultasPlantilla,
   infoTurno,
   leerPlanCopia,
   quitarPlanAvanzado,
@@ -705,5 +708,58 @@ describe("planificación por horas de la vista Avanzada", () => {
     setVistaAvanzadaActivada(false);
     importarDatos(antiguo);
     expect(state.vistaAvanzadaActivada).toBe(true);
+  });
+});
+
+describe("horas trabajadas semanales", () => {
+  it("suma los turnos de los días anteriores de la semana en curso (M/T por horario y a mano con horas)", () => {
+    restaurarTurnosBase();
+    setInicioSemanaLaboral(1);
+    setFinSemanaLaboral(7);
+    // Semana del lunes 2026-09-07 al domingo 2026-09-13.
+    state.asignaciones = [
+      { fecha: "2026-09-07", turno: "M", empleadoId: 1, origen: "auto" }, // 8 h
+      { fecha: "2026-09-08", turno: "T", empleadoId: 1, origen: "auto" }, // 8 h
+      { fecha: "2026-09-09", turno: "M", empleadoId: 1, origen: "empresa", desde: "06:00", hasta: "10:00" } // 4 h
+    ];
+    // Si hoy es jueves 10: cuentan lunes + martes + miércoles = 20 h.
+    expect(horasTrabajadasSemana(1, "2026-09-10")).toBe(20);
+    // Si hoy es lunes 7, aún no hay días anteriores.
+    expect(horasTrabajadasSemana(1, "2026-09-07")).toBe(0);
+    // Si hoy es martes 8, solo cuenta el lunes.
+    expect(horasTrabajadasSemana(1, "2026-09-08")).toBe(8);
+  });
+
+  it("ignora los días futuros, la semana anterior, otros empleados y los días fuera de la semana laboral", () => {
+    restaurarTurnosBase();
+    setInicioSemanaLaboral(1);
+    setFinSemanaLaboral(7);
+    state.asignaciones = [
+      { fecha: "2026-09-07", turno: "M", empleadoId: 2, origen: "auto" }, // 8 h
+      { fecha: "2026-09-11", turno: "M", empleadoId: 1, origen: "auto" }, // viernes: futuro
+      { fecha: "2026-08-31", turno: "M", empleadoId: 1, origen: "auto" }, // lunes de la semana anterior
+      { fecha: "2026-09-06", turno: "M", empleadoId: 1, origen: "auto" }  // domingo: fuera (lunes a domingo)
+    ];
+    expect(horasTrabajadasSemana(2, "2026-09-10")).toBe(8);
+    expect(horasTrabajadasSemana(1, "2026-09-10")).toBe(0);
+  });
+
+  it("un turno sin horario definido cuenta 0 horas", () => {
+    expect(horasDeAsignacion({ fecha: "2026-09-07", turno: "Ψ", empleadoId: 1, origen: "auto" })).toBe(0);
+  });
+});
+
+describe("columnas ocultas de Plantilla", () => {
+  it("guarda y restaura la preferencia, y viaja en exportar/importar", () => {
+    expect(state.columnasOcultasPlantilla).toEqual([]);
+    setColumnasOcultasPlantilla(["telefono", "alta"]);
+    expect(state.columnasOcultasPlantilla).toEqual(["telefono", "alta"]);
+    const datos = exportarDatos();
+    expect(datos.columnasOcultasPlantilla).toEqual(["telefono", "alta"]);
+    setColumnasOcultasPlantilla([]);
+    expect(state.columnasOcultasPlantilla).toEqual([]);
+    importarDatos(datos);
+    expect(state.columnasOcultasPlantilla).toEqual(["telefono", "alta"]);
+    setColumnasOcultasPlantilla([]);
   });
 });

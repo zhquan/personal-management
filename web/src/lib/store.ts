@@ -49,6 +49,8 @@ interface AppData {
   vistaAvanzadaActivada: boolean;
   /** Semanas mostradas en el Calendario de turnos: 1 o 2. */
   semanasCalendario: 1 | 2;
+  /** Columnas ocultadas en la tabla de Plantilla (claves de vista). */
+  columnasOcultasPlantilla: string[];
 }
 
 const vacio = (): AppData => ({
@@ -70,7 +72,8 @@ const vacio = (): AppData => ({
   duracionFranjaVistaAvanzada: MINUTOS_FRANJA,
   planAvanzada: [],
   vistaAvanzadaActivada: true,
-  semanasCalendario: 2
+  semanasCalendario: 2,
+  columnasOcultasPlantilla: []
 });
 
 /** Valida y normaliza un tramo de planificación de la vista Avanzada (o lo descarta). */
@@ -127,6 +130,12 @@ function cargar(): AppData {
     // Inicio y fin de la semana laboral (v9): por defecto lunes a domingo.
     d.inicioSemanaLaboral = esDiaSemana(d.inicioSemanaLaboral) ? d.inicioSemanaLaboral : 1;
     d.finSemanaLaboral = esDiaSemana(d.finSemanaLaboral) ? d.finSemanaLaboral : 7;
+    // Semanas del Calendario de turnos (v10): 1 o 2.
+    d.semanasCalendario = d.semanasCalendario === 1 ? 1 : 2;
+    // Columnas ocultas de la tabla de Plantilla: claves de vista válidas.
+    d.columnasOcultasPlantilla = Array.isArray(d.columnasOcultasPlantilla)
+      ? d.columnasOcultasPlantilla.filter((x) => typeof x === "string")
+      : [];
     d.periodosCierre = Array.isArray(d.periodosCierre)
       ? (d.periodosCierre as PeriodoCierre[]).filter(
           (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
@@ -646,7 +655,8 @@ export function exportarDatos(): AppData {
       duracionFranjaVistaAvanzada: state.duracionFranjaVistaAvanzada,
       planAvanzada: state.planAvanzada,
       vistaAvanzadaActivada: state.vistaAvanzadaActivada,
-      semanasCalendario: state.semanasCalendario
+      semanasCalendario: state.semanasCalendario,
+      columnasOcultasPlantilla: state.columnasOcultasPlantilla
     })
   ) as AppData;
 }
@@ -673,6 +683,9 @@ export function importarDatos(raw: unknown): ResultadoImport {
   state.descansos = Array.isArray(d.descansos) ? d.descansos.filter((x) => typeof x === "string") : [];
   state.planAvanzada = normalizarPlanAvanzado(d.planAvanzada);
   state.vistaAvanzadaActivada = d.vistaAvanzadaActivada !== false;
+  state.columnasOcultasPlantilla = Array.isArray(d.columnasOcultasPlantilla)
+    ? d.columnasOcultasPlantilla.filter((x) => typeof x === "string")
+    : [];
   state.asignaciones = Array.isArray(d.asignaciones)
     ? (d.asignaciones as Asignacion[])
         .filter((a) => a && typeof a === "object" && (a as { origen?: string }).origen !== "auto")
@@ -768,6 +781,12 @@ export function setFinSemanaLaboral(dia: number) {
 /** Semanas mostradas en el Calendario de turnos: 1 o 2 (quincena). */
 export function setSemanasCalendario(n: 1 | 2) {
   state.semanasCalendario = n;
+  guardar();
+}
+
+/** Columnas ocultas en la tabla de Plantilla (se guarda tal cual). */
+export function setColumnasOcultasPlantilla(claves: string[]) {
+  state.columnasOcultasPlantilla = claves;
   guardar();
 }
 
@@ -945,8 +964,12 @@ export function infoTurno(sigla: string): {
   desde?: string;
   hasta?: string;
 } {
-  if (sigla === "M") return { nombre: "Mañana" };
-  if (sigla === "T") return { nombre: "Tarde" };
+  if (sigla === "M" || sigla === "T") {
+    const base = TIPOS_TURNO_BASE.find((t) => t.sigla === sigla);
+    return base
+      ? { nombre: base.nombre, desde: base.desde, hasta: base.hasta }
+      : { nombre: sigla };
+  }
   const t = state.tiposTurno.find((x) => x.sigla === sigla);
   return t
     ? { nombre: t.nombre || sigla, color: t.color, desde: t.desde, hasta: t.hasta }
@@ -956,6 +979,47 @@ export function infoTurno(sigla: string): {
 /** Turnos que entran en la rotación automática (en orden de rotación). */
 export function turnosAutomaticos(): string[] {
   return state.tiposTurno.filter((t) => t.automatico).map((t) => t.sigla);
+}
+
+/**
+ * Duración en horas (1 decimal) de un turno asignado: si la asignación trae
+ * `desde`/`hasta` propias (turno fijado a mano con horario) se usan esas;
+ * si no, el horario por defecto del tipo de turno (Mañana/Tarde definidos en
+ * Ajustes). Un turno sin horario definido cuenta 0 horas.
+ */
+export function horasDeAsignacion(a: Asignacion): number {
+  const desde = a.desde ?? infoTurno(a.turno).desde;
+  const hasta = a.hasta ?? infoTurno(a.turno).hasta;
+  const h = minutosDe(desde ?? "");
+  const m = minutosDe(hasta ?? "");
+  if (h === null || m === null || m <= h) return 0;
+  return Math.round(((m - h) / 60) * 10) / 10;
+}
+
+/**
+ * Horas trabajadas de un empleado **en la semana en curso**: solo se suman
+ * los días anteriores a hoy (si hoy es jueves, cuentan lunes, martes y
+ * miércoles). La semana va del `inicioSemanaLaboral` (por defecto lunes) al
+ * `finSemanaLaboral` (por defecto domingo), así que el acumulado vuelve a
+ * cero al empezar cada semana laboral.
+ */
+export function horasTrabajadasSemana(empleadoId: number, referencia: Fecha = hoy()): number {
+  const ini = state.inicioSemanaLaboral;
+  // Fecha del día de inicio de la semana laboral de la semana de `referencia`.
+  let inicioSemana = referencia;
+  for (let i = 0; i < 7; i++) {
+    if (diaSemanaISO(inicioSemana) === ini) break;
+    inicioSemana = addDays(inicioSemana, -1);
+  }
+  let total = 0;
+  // Del inicio de la semana al día anterior a la referencia (ambos laborables).
+  for (let d = inicioSemana; compare(d, referencia) < 0; d = addDays(d, 1)) {
+    if (!diaEnSemanaLaboral(d)) continue;
+    for (const a of state.asignaciones) {
+      if (a.fecha === d && a.empleadoId === empleadoId) total += horasDeAsignacion(a);
+    }
+  }
+  return Math.round(total * 10) / 10;
 }
 
 // ---------------------------------------------------------- Copias de seguridad

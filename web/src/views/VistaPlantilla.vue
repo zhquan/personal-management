@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import Icono from "../components/Icono.vue";
 import Modal from "../components/Modal.vue";
 import CampoFecha from "../components/CampoFecha.vue";
@@ -9,25 +9,72 @@ import {
   empleadosOrdenados,
   guardarEmpleado,
   historialDeEmpleado,
+  horasTrabajadasSemana,
   regenerarAlrededor,
   saldoTiemposPorEmpleado,
+  setColumnasOcultasPlantilla,
+  state,
   vacacionesDisponiblesAnio,
   vacacionesUsadasAnio
 } from "../lib/store";
 import { CONTRATO_POR_DEFECTO, iniciales, nombreCompleto, plantillaEmpleado, TIPOS_CONTRATO } from "../lib/types";
 import type { Empleado, HistorialItem } from "../lib/types";
 import { fmt, fmtFechaHora, hoy, transcurridoTexto } from "../lib/dates";
-import { formatearTiempo, descripcionSaldo } from "../lib/tiempo";
-
-type ClaveOrden =
+import { formatearTiempo, descripcionSaldo } from "../lib/tiempo";type ClaveOrden =
   | "empleada"
   | "telefono"
   | "contrato"
+  | "horas"
   | "antiguedad"
   | "alta"
   | "motivoBaja"
   | "tiempo"
   | "vacaciones";
+
+// ------------------------------------------------------------- selector de columnas
+/** Claves de columnas ocultables; Empleados y las acciones siempre se muestran. */
+type Columna = Exclude<ClaveOrden, "empleada">;
+
+/** Etiquetas de las columnas ocultables (cabecera de la tabla y del menú). */
+const ETIQUETAS_COLUMNAS: Record<Columna, string> = {
+  telefono: "Teléfono",
+  contrato: "Contrato",
+  horas: "Horas trabajadas",
+  antiguedad: "Antigüedad",
+  alta: "Fecha alta",
+  motivoBaja: "Motivo de baja",
+  tiempo: "Tiempo recuperable",
+  vacaciones: "Vacaciones"
+};
+
+/** Todas las columnas ocultables, en el orden en que aparecen en la tabla. */
+const COLUMNAS_TODAS: Columna[] = [
+  "telefono",
+  "contrato",
+  "horas",
+  "antiguedad",
+  "alta",
+  "motivoBaja",
+  "tiempo",
+  "vacaciones"
+];
+
+/** ¿Está visible la columna? (las ocultas viven en state.columnasOcultasPlantilla). */
+function esVisible(clave: Columna): boolean {
+  return !state.columnasOcultasPlantilla.includes(clave);
+}
+
+function alternarColumna(clave: Columna) {
+  setColumnasOcultasPlantilla(
+    state.columnasOcultasPlantilla.includes(clave)
+      ? state.columnasOcultasPlantilla.filter((c) => c !== clave)
+      : [...state.columnasOcultasPlantilla, clave]
+  );
+}
+
+function todasColumnasVisibles() {
+  setColumnasOcultasPlantilla([]);
+}
 
 /** Orden activo de la tabla: columna y dirección (1 = ascendente, -1 = descendente). */
 const orden = ref<{ clave: ClaveOrden; dir: 1 | -1 }>({ clave: "empleada", dir: 1 });
@@ -63,6 +110,31 @@ function conteoFiltro(id: FiltroEstado): number {
   return totales.value.total;
 }
 
+// -------------------------------------------------- horas trabajadas (semana)
+// Horas ya trabajadas en la semana laboral en curso (los días anteriores a
+// hoy) frente a la jornada semanal del perfil. Se recalcula al cambiar los
+// empleados, el filtro, la búsqueda o el orden — y, para refrescarlo con el
+// paso de los días, también cada minuto (solo re-renderiza si cambió el valor).
+const relojSemana = ref(0);
+let temporizadorSemana: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  temporizadorSemana = setInterval(() => { relojSemana.value++; }, 60_000);
+});
+onBeforeUnmount(() => {
+  if (temporizadorSemana) clearInterval(temporizadorSemana);
+});
+
+function horasDe(e: Empleado): number {
+  void relojSemana.value;
+  return horasTrabajadasSemana(e.id);
+}
+
+function tituloHoras(e: Empleado): string {
+  const acumuladas = horasDe(e);
+  const faltan = Math.round((e.jornadaHoras - acumuladas) * 10) / 10;
+  return `Horas trabajadas de ${nombreCompleto(e)} de la semana en curso (hasta ayer): ${acumuladas} h. Jornada: ${e.jornadaHoras || "sin fijar"} h/semana${e.jornadaHoras && faltan > 0 ? ` · faltan ${faltan} h` : ""}`;
+}
+
 const mensajeVacio = computed(() => {
   if (!totales.value.total) {
     return { titulo: "Aún no hay empleados registrados.", sub: "Pulsa «Añadir empleado» para crear el primero." };
@@ -90,6 +162,7 @@ const empleados = computed(() => {
   const { clave, dir } = orden.value;
   const saldos = clave === "tiempo" ? saldoTiemposPorEmpleado() : null;
   const usadas = clave === "vacaciones" ? new Map(lista.map((e) => [e.id, vacacionesUsadasAnio(e.id)])) : null;
+  const horas = clave === "horas" ? new Map(lista.map((e) => [e.id, horasDe(e)])) : null;
   lista.sort((a, b) => {
     // Los empleados de baja quedan siempre al final del listado (se compara la
     // presencia de baja, no la fecha, para que el resto de columnas sí ordene).
@@ -114,6 +187,9 @@ const empleados = computed(() => {
         break;
       case "tiempo":
         cmp = (saldos?.get(a.id) ?? 0) - (saldos?.get(b.id) ?? 0);
+        break;
+      case "horas":
+        cmp = (horas?.get(a.id) ?? 0) - (horas?.get(b.id) ?? 0);
         break;
       case "vacaciones":
         cmp = (usadas?.get(a.id) ?? 0) - (usadas?.get(b.id) ?? 0);
@@ -276,6 +352,18 @@ function antiguedadDe(e: Empleado): string {
 
 const antiguedadModal = computed(() => (borrador.alta ? transcurridoTexto(borrador.alta, hoy()) : "—"));
 
+// ------------------------------------------------------- menú selector de columnas
+const selectorAbierto = ref(false);
+const raizSelector = ref<HTMLElement | null>(null);
+
+function alPulsarFuera(ev: MouseEvent) {
+  if (selectorAbierto.value && raizSelector.value && !raizSelector.value.contains(ev.target as Node)) {
+    selectorAbierto.value = false;
+  }
+}
+onMounted(() => document.addEventListener("click", alPulsarFuera));
+onBeforeUnmount(() => document.removeEventListener("click", alPulsarFuera));
+
 // --------------------------------------------------------------- historial
 const historialAbierto = ref(false);
 const historialEmp = ref<Empleado | null>(null);
@@ -341,6 +429,32 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             <span class="chip-num">{{ conteoFiltro(f.id) }}</span>
           </button>
         </div>
+        <div class="selector-columnas" ref="raizSelector">
+          <button
+            type="button"
+            class="btn"
+            :class="{ primario: selectorAbierto }"
+            aria-haspopup="true"
+            :aria-expanded="selectorAbierto"
+            title="Elegir qué columnas mostrar"
+            @click="selectorAbierto = !selectorAbierto"
+          >
+            <Icono nombre="ajustes" :tam="15" /> Columnas
+          </button>
+          <div v-if="selectorAbierto" class="menu-columnas" role="menu">
+            <div class="menu-cabecera">Columnas visibles</div>
+            <label v-for="c in COLUMNAS_TODAS" :key="c" class="menu-item">
+              <input type="checkbox" :checked="esVisible(c)" @change="alternarColumna(c)" />
+              <span>{{ ETIQUETAS_COLUMNAS[c] }}</span>
+            </label>
+            <div class="menu-pie">
+              <button type="button" class="btn chico" :disabled="state.columnasOcultasPlantilla.length === 0" @click="todasColumnasVisibles()">
+                Mostrar todo
+              </button>
+              <button type="button" class="btn chico" @click="selectorAbierto = false">Cerrar</button>
+            </div>
+          </div>
+        </div>
         <button class="btn primario" @click="abrirNueva"><Icono nombre="mas" /> Añadir empleado</button>
       </div>
     </header>
@@ -352,32 +466,17 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             <th class="th-ordenable" title="Ordenar por empleado" :aria-sort="ariaOrden('empleada')" @click="alternarOrden('empleada')">
               Empleados<span class="flecha" v-if="flechaOrden('empleada')">{{ flechaOrden('empleada') }}</span>
             </th>
-            <th class="th-ordenable" title="Ordenar por teléfono" :aria-sort="ariaOrden('telefono')" @click="alternarOrden('telefono')">
-              Teléfono<span class="flecha" v-if="flechaOrden('telefono')">{{ flechaOrden('telefono') }}</span>
-            </th>
-            <th class="th-ordenable" title="Ordenar por tipo de contrato" :aria-sort="ariaOrden('contrato')" @click="alternarOrden('contrato')">
-              Contrato<span class="flecha" v-if="flechaOrden('contrato')">{{ flechaOrden('contrato') }}</span>
-            </th>
-            <th class="th-ordenable" title="Ordenar por antigüedad (más antigua primero)" :aria-sort="ariaOrden('antiguedad')" @click="alternarOrden('antiguedad')">
-              Antigüedad<span class="flecha" v-if="flechaOrden('antiguedad')">{{ flechaOrden('antiguedad') }}</span>
-            </th>
-            <th class="th-ordenable" title="Ordenar por fecha de alta (más antigua primero)" :aria-sort="ariaOrden('alta')" @click="alternarOrden('alta')">
-              Fecha alta<span class="flecha" v-if="flechaOrden('alta')">{{ flechaOrden('alta') }}</span>
-            </th>
-            <th class="th-ordenable" title="Ordenar por motivo de baja" :aria-sort="ariaOrden('motivoBaja')" @click="alternarOrden('motivoBaja')">
-              Motivo de baja<span class="flecha" v-if="flechaOrden('motivoBaja')">{{ flechaOrden('motivoBaja') }}</span>
-            </th>
-            <th
-              class="th-ordenable"
-              title="Ordenar por tiempo recuperable. − = horas extra realizadas · + = debe horas"
-              :aria-sort="ariaOrden('tiempo')"
-              @click="alternarOrden('tiempo')"
-            >
-              Tiempo Recuperable<span class="flecha" v-if="flechaOrden('tiempo')">{{ flechaOrden('tiempo') }}</span>
-            </th>
-            <th class="th-ordenable" title="Ordenar por días de vacaciones usados este año" :aria-sort="ariaOrden('vacaciones')" @click="alternarOrden('vacaciones')">
-              Vacaciones {{ new Date().getFullYear() }}<span class="flecha" v-if="flechaOrden('vacaciones')">{{ flechaOrden('vacaciones') }}</span>
-            </th>
+            <template v-for="c in COLUMNAS_TODAS" :key="c">
+              <th
+                v-if="esVisible(c)"
+                class="th-ordenable"
+                :title="`Ordenar por ${ETIQUETAS_COLUMNAS[c].toLowerCase()}`"
+                :aria-sort="ariaOrden(c)"
+                @click="alternarOrden(c)"
+              >
+                {{ ETIQUETAS_COLUMNAS[c] }}<template v-if="c === 'vacaciones'"> {{ new Date().getFullYear() }}</template><span class="flecha" v-if="flechaOrden(c)">{{ flechaOrden(c) }}</span>
+              </th>
+            </template>
             <th style="width: 96px"></th>
           </tr>
         </thead>
@@ -405,20 +504,29 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
                 </div>
               </div>
             </td>
-            <td style="color: var(--subtitulo); font-size: 13px; white-space: nowrap">{{ e.telefono || "—" }}</td>
-            <td style="white-space: nowrap">
+            <td v-if="esVisible('telefono')" style="color: var(--subtitulo); font-size: 13px; white-space: nowrap">{{ e.telefono || "—" }}</td>
+            <td v-if="esVisible('contrato')" style="white-space: nowrap">
               <div style="font-weight: 600; font-size: 13px">{{ e.tipoContrato || "—" }}</div>
               <div style="font-size: 11.5px; color: var(--apagado)">
                 {{ e.jornadaHoras ? `${e.jornadaHoras} h/semana` : "jornada sin fijar" }}
               </div>
             </td>
-            <td style="white-space: nowrap">
+            <td v-if="esVisible('horas')" style="white-space: nowrap">
+              <span
+                class="etiqueta"
+                :class="horasDe(e) >= e.jornadaHoras && e.jornadaHoras > 0 ? 'roja' : 'ok'"
+                :title="tituloHoras(e)"
+              >
+                {{ horasDe(e) }} / {{ e.jornadaHoras || "—" }} h
+              </span>
+            </td>
+            <td v-if="esVisible('antiguedad')" style="white-space: nowrap">
               <span style="font-size: 13px">{{ antiguedadDe(e) }}</span>
             </td>
-            <td style="white-space: nowrap" :title="`Alta el ${fmt(e.alta)}`">
+            <td v-if="esVisible('alta')" style="white-space: nowrap" :title="`Alta el ${fmt(e.alta)}`">
               <span style="font-size: 13px">{{ fmt(e.alta) }}</span>
             </td>
-            <td>
+            <td v-if="esVisible('motivoBaja')">
               <span
                 v-if="e.baja && e.motivoBaja"
                 class="motivo-baja"
@@ -426,14 +534,14 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
               >{{ e.motivoBaja }}</span>
               <span v-else style="color: var(--apagado)">—</span>
             </td>
-            <td style="white-space: nowrap">
+            <td v-if="esVisible('tiempo')" style="white-space: nowrap">
               <span
                 class="etiqueta"
                 :class="saldoDe(e) < 0 ? 'ok' : saldoDe(e) > 0 ? 'roja' : 'neutra'"
                 :title="`${descripcionSaldo(saldoDe(e))}. ${formatearTiempo(saldoDe(e))}`"
               >{{ formatearTiempo(saldoDe(e)) }}</span>
             </td>
-            <td>
+            <td v-if="esVisible('vacaciones')">
               <span
                 class="etiqueta"
                 :class="usadas(e) >= diasDisponibles(e) ? 'roja' : 'ok'"
@@ -845,5 +953,54 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
 .chip-filtro.activo .chip-num {
   background: var(--acento);
   color: #fff;
+}
+
+/* ---- menú selector de columnas ---- */
+.selector-columnas {
+  position: relative;
+}
+.menu-columnas {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  padding: 6px;
+  min-width: 220px;
+}
+.menu-cabecera {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--subtitulo);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 6px 10px 4px;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--radio-chico);
+  font-size: 13.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.menu-item:hover {
+  background: var(--superficie-2);
+}
+.menu-item input {
+  accent-color: var(--acento);
+}
+.menu-pie {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  border-top: 1px solid var(--borde-suave);
+  margin-top: 4px;
+  padding: 8px 6px 2px;
 }
 </style>
