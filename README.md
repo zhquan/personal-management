@@ -43,10 +43,18 @@ Hovering any point or bar shows its exact value.
 - **Status filter**: Active / Not active / All, with counters (**default Active**).
 - **Single search box**: one box searches **name, last name, ID, phone and termination reason**
   at once, combined (AND) with the status filter.
+- **Column selector**: a *Columns* button in the header opens a menu with a checkbox per column,
+  so you can hide the ones you don't need (the employee column and the action buttons always
+  stay). The choice is remembered between sessions, travels with export/import, and *Show all*
+  restores every column at once.
 - **Sortable table**: click any header (↑/↓ toggles direction). Columns:
   - **Employees** — avatar with initials, full name, ID and status (active / terminated + date).
   - **Phone**.
   - **Contract** — contract type and weekly hours.
+  - **Worked hours** — `worked / contracted h`: the hours already worked in the **current working
+    week** (only days before today count, so on Thursday it covers Monday–Wednesday) against the
+    weekly hours from the profile. It resets to zero at the start of each working week (the start
+    day configured in Settings) and the label refreshes every minute.
   - **Tenure** — computed automatically from the start date («2 years, 3 months, 5 days») until
     today or until the termination date.
   - **Start date**.
@@ -357,11 +365,10 @@ cd web
 npm run version
 ```
 
-That command (also run automatically before `npm test`) propagates the version to `package.json`,
-`package-lock.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, so the other files
-never drift out of sync. To publish a release, push to `main` with a last commit message
-`Release x.y.z` matching the `VERSION` file — the workflow verifies that both match and fails the
-release if they don't.
+That command propagates the version to `package.json`, `package-lock.json`,
+`src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, so the other files never drift out of
+sync. To publish a release, push to `main` with a last commit message `Release x.y.z` matching
+the `VERSION` file — the workflow verifies that both match and fails the release if they don't.
 
 ## Structure
 
