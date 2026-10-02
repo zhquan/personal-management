@@ -49,6 +49,8 @@ interface AppData {
   vistaAvanzadaActivada: boolean;
   /** Semanas mostradas en el Calendario de turnos: 1 o 2. */
   semanasCalendario: 1 | 2;
+  /** Columnas ocultadas en la tabla de Plantilla (claves de vista). */
+  columnasOcultasPlantilla: string[];
 }
 
 const vacio = (): AppData => ({
@@ -70,7 +72,8 @@ const vacio = (): AppData => ({
   duracionFranjaVistaAvanzada: MINUTOS_FRANJA,
   planAvanzada: [],
   vistaAvanzadaActivada: true,
-  semanasCalendario: 2
+  semanasCalendario: 2,
+  columnasOcultasPlantilla: []
 });
 
 /** Valida y normaliza un tramo de planificación de la vista Avanzada (o lo descarta). */
@@ -127,6 +130,12 @@ function cargar(): AppData {
     // Inicio y fin de la semana laboral (v9): por defecto lunes a domingo.
     d.inicioSemanaLaboral = esDiaSemana(d.inicioSemanaLaboral) ? d.inicioSemanaLaboral : 1;
     d.finSemanaLaboral = esDiaSemana(d.finSemanaLaboral) ? d.finSemanaLaboral : 7;
+    // Semanas del Calendario de turnos (v10): 1 o 2.
+    d.semanasCalendario = d.semanasCalendario === 1 ? 1 : 2;
+    // Columnas ocultas de la tabla de Plantilla: claves de vista válidas.
+    d.columnasOcultasPlantilla = Array.isArray(d.columnasOcultasPlantilla)
+      ? d.columnasOcultasPlantilla.filter((x) => typeof x === "string")
+      : [];
     d.periodosCierre = Array.isArray(d.periodosCierre)
       ? (d.periodosCierre as PeriodoCierre[]).filter(
           (p) => p && typeof p.inicio === "string" && typeof p.fin === "string" && p.inicio <= p.fin)
@@ -646,7 +655,8 @@ export function exportarDatos(): AppData {
       duracionFranjaVistaAvanzada: state.duracionFranjaVistaAvanzada,
       planAvanzada: state.planAvanzada,
       vistaAvanzadaActivada: state.vistaAvanzadaActivada,
-      semanasCalendario: state.semanasCalendario
+      semanasCalendario: state.semanasCalendario,
+      columnasOcultasPlantilla: state.columnasOcultasPlantilla
     })
   ) as AppData;
 }
@@ -673,6 +683,9 @@ export function importarDatos(raw: unknown): ResultadoImport {
   state.descansos = Array.isArray(d.descansos) ? d.descansos.filter((x) => typeof x === "string") : [];
   state.planAvanzada = normalizarPlanAvanzado(d.planAvanzada);
   state.vistaAvanzadaActivada = d.vistaAvanzadaActivada !== false;
+  state.columnasOcultasPlantilla = Array.isArray(d.columnasOcultasPlantilla)
+    ? d.columnasOcultasPlantilla.filter((x) => typeof x === "string")
+    : [];
   state.asignaciones = Array.isArray(d.asignaciones)
     ? (d.asignaciones as Asignacion[])
         .filter((a) => a && typeof a === "object" && (a as { origen?: string }).origen !== "auto")
@@ -768,6 +781,12 @@ export function setFinSemanaLaboral(dia: number) {
 /** Semanas mostradas en el Calendario de turnos: 1 o 2 (quincena). */
 export function setSemanasCalendario(n: 1 | 2) {
   state.semanasCalendario = n;
+  guardar();
+}
+
+/** Columnas ocultas en la tabla de Plantilla (se guarda tal cual). */
+export function setColumnasOcultasPlantilla(claves: string[]) {
+  state.columnasOcultasPlantilla = claves;
   guardar();
 }
 

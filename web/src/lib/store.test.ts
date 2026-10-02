@@ -23,6 +23,7 @@ import {
   horasDeAsignacion,
   horasTrabajadasSemana,
   importarDatos,
+  setColumnasOcultasPlantilla,
   infoTurno,
   leerPlanCopia,
   quitarPlanAvanzado,
@@ -745,5 +746,20 @@ describe("horas trabajadas semanales", () => {
 
   it("un turno sin horario definido cuenta 0 horas", () => {
     expect(horasDeAsignacion({ fecha: "2026-09-07", turno: "Ψ", empleadoId: 1, origen: "auto" })).toBe(0);
+  });
+});
+
+describe("columnas ocultas de Plantilla", () => {
+  it("guarda y restaura la preferencia, y viaja en exportar/importar", () => {
+    expect(state.columnasOcultasPlantilla).toEqual([]);
+    setColumnasOcultasPlantilla(["telefono", "alta"]);
+    expect(state.columnasOcultasPlantilla).toEqual(["telefono", "alta"]);
+    const datos = exportarDatos();
+    expect(datos.columnasOcultasPlantilla).toEqual(["telefono", "alta"]);
+    setColumnasOcultasPlantilla([]);
+    expect(state.columnasOcultasPlantilla).toEqual([]);
+    importarDatos(datos);
+    expect(state.columnasOcultasPlantilla).toEqual(["telefono", "alta"]);
+    setColumnasOcultasPlantilla([]);
   });
 });
