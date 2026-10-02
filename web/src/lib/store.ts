@@ -945,8 +945,12 @@ export function infoTurno(sigla: string): {
   desde?: string;
   hasta?: string;
 } {
-  if (sigla === "M") return { nombre: "Mañana" };
-  if (sigla === "T") return { nombre: "Tarde" };
+  if (sigla === "M" || sigla === "T") {
+    const base = TIPOS_TURNO_BASE.find((t) => t.sigla === sigla);
+    return base
+      ? { nombre: base.nombre, desde: base.desde, hasta: base.hasta }
+      : { nombre: sigla };
+  }
   const t = state.tiposTurno.find((x) => x.sigla === sigla);
   return t
     ? { nombre: t.nombre || sigla, color: t.color, desde: t.desde, hasta: t.hasta }
@@ -956,6 +960,47 @@ export function infoTurno(sigla: string): {
 /** Turnos que entran en la rotación automática (en orden de rotación). */
 export function turnosAutomaticos(): string[] {
   return state.tiposTurno.filter((t) => t.automatico).map((t) => t.sigla);
+}
+
+/**
+ * Duración en horas (1 decimal) de un turno asignado: si la asignación trae
+ * `desde`/`hasta` propias (turno fijado a mano con horario) se usan esas;
+ * si no, el horario por defecto del tipo de turno (Mañana/Tarde definidos en
+ * Ajustes). Un turno sin horario definido cuenta 0 horas.
+ */
+export function horasDeAsignacion(a: Asignacion): number {
+  const desde = a.desde ?? infoTurno(a.turno).desde;
+  const hasta = a.hasta ?? infoTurno(a.turno).hasta;
+  const h = minutosDe(desde ?? "");
+  const m = minutosDe(hasta ?? "");
+  if (h === null || m === null || m <= h) return 0;
+  return Math.round(((m - h) / 60) * 10) / 10;
+}
+
+/**
+ * Horas trabajadas de un empleado **en la semana en curso**: solo se suman
+ * los días anteriores a hoy (si hoy es jueves, cuentan lunes, martes y
+ * miércoles). La semana va del `inicioSemanaLaboral` (por defecto lunes) al
+ * `finSemanaLaboral` (por defecto domingo), así que el acumulado vuelve a
+ * cero al empezar cada semana laboral.
+ */
+export function horasTrabajadasSemana(empleadoId: number, referencia: Fecha = hoy()): number {
+  const ini = state.inicioSemanaLaboral;
+  // Fecha del día de inicio de la semana laboral de la semana de `referencia`.
+  let inicioSemana = referencia;
+  for (let i = 0; i < 7; i++) {
+    if (diaSemanaISO(inicioSemana) === ini) break;
+    inicioSemana = addDays(inicioSemana, -1);
+  }
+  let total = 0;
+  // Del inicio de la semana al día anterior a la referencia (ambos laborables).
+  for (let d = inicioSemana; compare(d, referencia) < 0; d = addDays(d, 1)) {
+    if (!diaEnSemanaLaboral(d)) continue;
+    for (const a of state.asignaciones) {
+      if (a.fecha === d && a.empleadoId === empleadoId) total += horasDeAsignacion(a);
+    }
+  }
+  return Math.round(total * 10) / 10;
 }
 
 // ---------------------------------------------------------- Copias de seguridad

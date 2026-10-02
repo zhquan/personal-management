@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import Icono from "../components/Icono.vue";
 import Modal from "../components/Modal.vue";
 import CampoFecha from "../components/CampoFecha.vue";
@@ -9,6 +9,7 @@ import {
   empleadosOrdenados,
   guardarEmpleado,
   historialDeEmpleado,
+  horasTrabajadasSemana,
   regenerarAlrededor,
   saldoTiemposPorEmpleado,
   vacacionesDisponiblesAnio,
@@ -23,6 +24,7 @@ type ClaveOrden =
   | "empleada"
   | "telefono"
   | "contrato"
+  | "horas"
   | "antiguedad"
   | "alta"
   | "motivoBaja"
@@ -63,6 +65,31 @@ function conteoFiltro(id: FiltroEstado): number {
   return totales.value.total;
 }
 
+// -------------------------------------------------- horas trabajadas (semana)
+// Horas ya trabajadas en la semana laboral en curso (los días anteriores a
+// hoy) frente a la jornada semanal del perfil. Se recalcula al cambiar los
+// empleados, el filtro, la búsqueda o el orden — y, para refrescarlo con el
+// paso de los días, también cada minuto (solo re-renderiza si cambió el valor).
+const relojSemana = ref(0);
+let temporizadorSemana: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  temporizadorSemana = setInterval(() => { relojSemana.value++; }, 60_000);
+});
+onBeforeUnmount(() => {
+  if (temporizadorSemana) clearInterval(temporizadorSemana);
+});
+
+function horasDe(e: Empleado): number {
+  void relojSemana.value;
+  return horasTrabajadasSemana(e.id);
+}
+
+function tituloHoras(e: Empleado): string {
+  const acumuladas = horasDe(e);
+  const faltan = Math.round((e.jornadaHoras - acumuladas) * 10) / 10;
+  return `Horas trabajadas de ${nombreCompleto(e)} de la semana en curso (hasta ayer): ${acumuladas} h. Jornada: ${e.jornadaHoras || "sin fijar"} h/semana${e.jornadaHoras && faltan > 0 ? ` · faltan ${faltan} h` : ""}`;
+}
+
 const mensajeVacio = computed(() => {
   if (!totales.value.total) {
     return { titulo: "Aún no hay empleados registrados.", sub: "Pulsa «Añadir empleado» para crear el primero." };
@@ -90,6 +117,7 @@ const empleados = computed(() => {
   const { clave, dir } = orden.value;
   const saldos = clave === "tiempo" ? saldoTiemposPorEmpleado() : null;
   const usadas = clave === "vacaciones" ? new Map(lista.map((e) => [e.id, vacacionesUsadasAnio(e.id)])) : null;
+  const horas = clave === "horas" ? new Map(lista.map((e) => [e.id, horasDe(e)])) : null;
   lista.sort((a, b) => {
     // Los empleados de baja quedan siempre al final del listado (se compara la
     // presencia de baja, no la fecha, para que el resto de columnas sí ordene).
@@ -114,6 +142,9 @@ const empleados = computed(() => {
         break;
       case "tiempo":
         cmp = (saldos?.get(a.id) ?? 0) - (saldos?.get(b.id) ?? 0);
+        break;
+      case "horas":
+        cmp = (horas?.get(a.id) ?? 0) - (horas?.get(b.id) ?? 0);
         break;
       case "vacaciones":
         cmp = (usadas?.get(a.id) ?? 0) - (usadas?.get(b.id) ?? 0);
@@ -358,6 +389,14 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
             <th class="th-ordenable" title="Ordenar por tipo de contrato" :aria-sort="ariaOrden('contrato')" @click="alternarOrden('contrato')">
               Contrato<span class="flecha" v-if="flechaOrden('contrato')">{{ flechaOrden('contrato') }}</span>
             </th>
+            <th
+              class="th-ordenable"
+              title="Ordenar por horas trabajadas en la semana en curso (los días anteriores a hoy)"
+              :aria-sort="ariaOrden('horas')"
+              @click="alternarOrden('horas')"
+            >
+              Horas trabajadas<span class="flecha" v-if="flechaOrden('horas')">{{ flechaOrden('horas') }}</span>
+            </th>
             <th class="th-ordenable" title="Ordenar por antigüedad (más antigua primero)" :aria-sort="ariaOrden('antiguedad')" @click="alternarOrden('antiguedad')">
               Antigüedad<span class="flecha" v-if="flechaOrden('antiguedad')">{{ flechaOrden('antiguedad') }}</span>
             </th>
@@ -411,6 +450,15 @@ function etiquetaTipoHistorial(t: HistorialItem["tipo"]): string {
               <div style="font-size: 11.5px; color: var(--apagado)">
                 {{ e.jornadaHoras ? `${e.jornadaHoras} h/semana` : "jornada sin fijar" }}
               </div>
+            </td>
+            <td style="white-space: nowrap">
+              <span
+                class="etiqueta"
+                :class="horasDe(e) >= e.jornadaHoras && e.jornadaHoras > 0 ? 'roja' : 'ok'"
+                :title="tituloHoras(e)"
+              >
+                {{ horasDe(e) }} / {{ e.jornadaHoras || "—" }} h
+              </span>
             </td>
             <td style="white-space: nowrap">
               <span style="font-size: 13px">{{ antiguedadDe(e) }}</span>
